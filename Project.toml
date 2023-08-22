@@ -1,0 +1,11 @@
+name = "scAPA"
+uuid = "5901e1b6-9d57-4c3d-b132-0ee00fa39234"
+authors = "Jieyi Xiong <xiongjieyi@kuleuven.be>"
+version = "0.1.0"
+
+[deps]
+XAM = "d759349c-bcba-11e9-07c2-5b90f8f05f7c"
+GenomicFeatures = "899a7d2d-5c61-547b-bef9-6698a8d05446"
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+SortingLab = "562c1548-17b8-5b69-83cf-d8aebec229f5"

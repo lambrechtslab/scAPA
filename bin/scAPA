@@ -1,0 +1,11 @@
+#!/usr/bin/env julia
+
+println("[s]ingle-[c]ell [A]lternative s[P]licing [A]nalyzer")
+println("Initiating....")
+try
+    @eval using scAPA
+catch
+    include(joinpath(@__DIR__, "../src/scAPA.jl"))
+end
+scAPA.main()
+println("scAPA has finished.")
