@@ -60,9 +60,13 @@ $ /path/to/julia ./scAPA ...
 This demo shows how to use scAPA to detect and quantify ASEs on single-cell data of 1000 Peripheral Blood Mononuclear Cells (PBMCs) from a Healthy Donor, which is public available on the website of 10x Genomics as an example. For this data, libraries were generated with 10x Genomics 3' Single Cell Gene Expression v3 chemistry and data were pre-analyzed with Cell Ranger version 3.0 for the aligned bam file and the cell clustering result.
 
 First, download the example bam file of 10x single-cell data (4.5G) into working directory:
-`wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_possorted_genome_bam.bam`
+```
+wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_possorted_genome_bam.bam
+```
 And prepare a sample sheet file:
-`echo -e "sample1\tpbmc_1k_v3_possorted_genome_bam.bam" > samplesheet.tsv`
+```
+echo -e "sample1\tpbmc_1k_v3_possorted_genome_bam.bam" > samplesheet.tsv
+```
 Next, download human genome annotation file into working directory:
 ```
 wget https://ftp.ensembl.org/pub/release-93/gtf/homo_sapiens/Homo_sapiens.GRCh38.93.gtf.gz
@@ -75,7 +79,9 @@ tar zxf pbmc_1k_v3_analysis.tar.gz analysis/clustering/graphclust/clusters.csv
 cat analysis/clustering/graphclust/clusters.csv | sed 1d | awk -F'-1,' '{print "sample1\t"$1"\tcellgroup"$2}' > cell_barcode.tsv
 ```
 At last, run scAPA. It usually takes several hours.
-`/path/to/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output`
+```
+/path/to/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
+```
 The output will be in folder `scAPA_output/`.
 ## Contacts
 Jieyi Xiong (jieyi.xiong[at]kuleuven.be); Diether Lambrechts (diether.lambrechts[at]kuleuven.be)
