@@ -19,7 +19,7 @@ The dependent packages and the external tool `StringTie` will be installed autom
 
 ## Usage
 ### Input data preparation
-Before analysis by scAPA, fastq files generated from 10x Genome 5'-scRNAseq platform should be firstly mapped by `cellranger`, and recommendedly analyzed for cell types. Three types of files are needed for the scAPA:
+Before analysis by scAPA, fastq files generated from 10x Genome scRNAseq platform should be firstly mapped by `cellranger`, and recommendedly analyzed for cell types. Three types of files are needed for the scAPA:
 1. The bam files output from `cellranger`.
 2. A sample sheet tsv file with two columns: sample ID (unique and no blanks), and bam file path. See example in `test/10x/samplesheet.tsv`.
 3. A genome annotation file (gtf). This file is suggested to use the same version as in the previous `cellranger`. For example, the Ensembl v93 human annotation gtf file can be downloaded from [here](https://ftp.ensembl.org/pub/release-93/gtf/homo_sapiens/Homo_sapiens.GRCh38.93.gtf.gz). `.gz` compressed file is accepted.
