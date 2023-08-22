@@ -2,7 +2,7 @@
 **s**ingle-**c**ell **A**lternative s**P**licing **A**nalyzer (scAPA) is a bioinformatic program to detect and quantify alternative splicing events (ASEs) from 10x Genome single-cell RNAseq data. scAPA detects reads spanning exon-exon junctions within a gene, while discovering all types of ASEs without totally rely on transcript annotation, quantifying ASEs on cell level based on barcodes,  adopting the uneven read coverages, and incorporating unique molecular identifier (UMI) information to handle single-cell data (Figure 1d; see Methods). scAPA only considers ASEs supported by at least 10 junction reads, allowing both a reference and alternative AS isoform to be defined.
 
 ## System requirements
-scAPA was designed to run under the command line of Linux server with memory no less than 32G.
+scAPA was designed to run under the command line of Linux environment compatible with Julia language and with memory no less than 64G.
 
 ## Installation
 Running scAPA relies on Julia language compiler on Linux OS. First of all, the user needs to install Julia (v1.7+). A binary version of Julia program can be downloaded from the [official website](https://julialang.org/downloads/).
