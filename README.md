@@ -82,6 +82,6 @@ At last, run scAPA. It usually takes several hours.
 ```
 /path/to/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
 ```
-The output will be in folder `scAPA_output/`.
+The outputs will be in folder `scAPA_output/`.
 ## Contacts
 Jieyi Xiong (jieyi.xiong[at]kuleuven.be); Diether Lambrechts (diether.lambrechts[at]kuleuven.be)
