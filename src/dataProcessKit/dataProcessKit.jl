@@ -2,9 +2,6 @@ __precompile__()
 
 module dataProcessKit
 # using SortingAlgorithms
-using Statistics
-using DelimitedFiles
-using Printf
 using SortingLab
 
 include("compatible.jl")
