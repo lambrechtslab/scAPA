@@ -13,7 +13,7 @@ $ julia -e 'using Pkg; Pkg.add(PackageSpec(url="git://github.com/lambrechtslab/s
 ```
 Or install under julia package environment (press key `]` in Julia REPL):
 ```julia
-(v1.9) pkg> add git@github.com:Jieyi-DiLaKULeuven/scAPA.git
+(v1.9) pkg> add git@github.com:lambrechtslab/scAPA.git
 ```
 The dependent packages and the external tool `StringTie` will be installed automatically. A softlink file `scAPA` will be created in the current path.
 
