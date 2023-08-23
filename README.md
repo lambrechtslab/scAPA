@@ -9,13 +9,14 @@ Running scAPA relies on Julia language compiler on Linux OS. First of all, the u
 
 scAPA can be installed by running the below code in bash:
 ```bash
-$ julia -e 'using Pkg; Pkg.add(PackageSpec(url="https://github.com/lambrechtslab/scAPA.git"))'
+$ julia -e 'using Pkg; Pkg.add(PackageSpec(url="https://github.com/lambrechtslab/scAPA.git")); Pkg.build("scAPA")'
 ```
 Or install under julia package environment (press key `]` in Julia REPL):
 ```julia
 (v1.9) pkg> add https://github.com/lambrechtslab/scAPA.git
+(v1.9) pkg> build scAPA
 ```
-The dependent packages and the external tool `StringTie` will be installed automatically. A softlink file `scAPA` will be created in the current path.
+The dependent packages and the external tool `StringTie` will be installed automatically. A softlink `~/scAPA` will be created at home directory and you can move it to where you want.
 
 ## Usage
 ### Input data preparation
@@ -27,14 +28,14 @@ Before analysis by scAPA, fastq files generated from 10x Genome scRNAseq platfor
 5. (Optional) A de-nova assembled GTF file. If missing, scAPA will generate one based on the input bam files and annotation files using `StringTie`.
 ### Run scAPA program
 ```bash
-$ ./scAPA -g ANNOTATION.gtf(.gz) -s SAMPLESHEET.tsv [-p THREAD] \
+$ ~/scAPA -g ANNOTATION.gtf(.gz) -s SAMPLESHEET.tsv [-p THREAD] \
       	     [-c CELL_BARCODE.tsv(.gz)] [-o OUTPUT-DIR] \
              [--assembled-annotation ASSEMBLED_ANNOTATION.gtf(.gz)] \
 	     [--stringtie STRINGTIE_PROGRAM] [--temp-dir TEMP_DIR]
 ```
 If `julia` is not in `$PATH` environment, run the below command instead:
 ```bash
-$ /path/to/julia ./scAPA ...
+$ /path/to/julia ~/scAPA ...
 ```
 #### Common arguments:
 *  `-g`, `--ref-annotation` _ANNOTATION.gtf_ GTF files of public reference annotation.
@@ -80,7 +81,7 @@ cat analysis/clustering/graphclust/clusters.csv | sed 1d | awk -F'-1,' '{print "
 ```
 At last, run scAPA. It usually takes several hours.
 ```
-/path/to/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
+~/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
 ```
 The outputs will be in folder `scAPA_output/`.
 ## Contacts
