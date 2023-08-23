@@ -9,7 +9,7 @@ Running scAPA relies on Julia language compiler on Linux OS. First of all, the u
 
 scAPA can be installed by running the below code in bash:
 ```bash
-$ julia -e 'using Pkg; Pkg.add(PackageSpec(url="git://github.com/Jieyi-DiLaKULeuven/scAPA.git"))'
+$ julia -e 'using Pkg; Pkg.add(PackageSpec(url="git://github.com/lambrechtslab/scAPA.git"))'
 ```
 Or install under julia package environment (press key `]` in Julia REPL):
 ```julia
@@ -39,7 +39,7 @@ $ /path/to/julia ./scAPA ...
 #### Common arguments:
 *  `-g`, `--ref-annotation` _ANNOTATION.gtf_ GTF files of public reference annotation.
 *  `-s`, `--samplesheet` _SAMPLESHEET.tsv_
-                        A tsv file with columns of sample id and bam files. Sample ID should be uniqued and without internal blanks.
+                        A tsv file with columns of sample id and bam files. Sample ID should be unique and without internal blanks.
 *  `-c`, `--cell-barcode` _CELL_BARCODE.tsv(.gz)_
                         A tsv(.gz) file with columns of sample id, cell barcode and cell group.
 *  `-o`, `--output-dir` _OUTPUT_DIR_ Directory of the outputs. scAPA will create one if not exists. (default: ".")
