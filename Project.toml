@@ -4,6 +4,7 @@ authors = "Jieyi Xiong <xiongjieyi@kuleuven.be>"
 version = "0.1.0"
 
 [deps]
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 XAM = "d759349c-bcba-11e9-07c2-5b90f8f05f7c"
 GenomicFeatures = "899a7d2d-5c61-547b-bef9-6698a8d05446"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
