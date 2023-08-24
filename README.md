@@ -18,6 +18,12 @@ Or install under julia package environment (press key `]` in Julia REPL):
 ```
 The dependent packages and the external tool `StringTie` will be installed automatically. A softlink `~/scAPA` will be created at home directory and you can move it to where you want.
 
+## Uninstallation
+```
+$ julia -e 'using Pkg; Pkg.rm("scAPA")'
+$ unlink ~/scAPA
+```
+
 ## Usage
 ### Input data preparation
 Before analysis by scAPA, fastq files generated from 10x Genome scRNAseq platform should be firstly mapped by `cellranger`, and recommendedly analyzed for cell types. Three types of files are needed for the scAPA:
