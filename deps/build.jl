@@ -1,5 +1,5 @@
 #Create a softlink for scAPA program.
-fn=joinpath(ENV["HOME"], scAPA)
+fn=joinpath(ENV["HOME"], "scAPA")
 if isfile(fn)
     run(`unlink $fn`)
 end
