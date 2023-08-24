@@ -9,7 +9,7 @@ Running scAPA relies on Julia language compiler on Linux OS. First of all, the u
 
 scAPA can be installed by running the below code in bash:
 ```bash
-$ julia -e 'using Pkg; Pkg.add(PackageSpec(url="https://github.com/lambrechtslab/scAPA.git")); Pkg.build("scAPA")'
+$ julia -e 'using Pkg; Pkg.add(PackageSpec(url="https://github.com/lambrechtslab/scAPA.git"))'
 ```
 Or install under julia package environment (press key `]` in Julia REPL):
 ```julia
