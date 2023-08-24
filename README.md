@@ -62,26 +62,26 @@ This demo shows how to use scAPA to detect and quantify ASEs on single-cell data
 
 First, download the example bam file of 10x single-cell data (4.5G) into working directory:
 ```
-wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_possorted_genome_bam.bam
+$ wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_possorted_genome_bam.bam
 ```
 And prepare a sample sheet file:
 ```
-echo -e "sample1\tpbmc_1k_v3_possorted_genome_bam.bam" > samplesheet.tsv
+$ echo -e "sample1\tpbmc_1k_v3_possorted_genome_bam.bam" > samplesheet.tsv
 ```
 Next, download human genome annotation file into working directory:
 ```
-wget https://ftp.ensembl.org/pub/release-93/gtf/homo_sapiens/Homo_sapiens.GRCh38.93.gtf.gz
-gunzip Homo_sapiens.GRCh38.93.gtf.gz
+$ wget https://ftp.ensembl.org/pub/release-93/gtf/homo_sapiens/Homo_sapiens.GRCh38.93.gtf.gz
+$ gunzip Homo_sapiens.GRCh38.93.gtf.gz
 ```
 Then we download the cell clustering result and use the major clusters as cell groups:
 ```
-wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_analysis.tar.gz
-tar zxf pbmc_1k_v3_analysis.tar.gz analysis/clustering/graphclust/clusters.csv
-cat analysis/clustering/graphclust/clusters.csv | sed 1d | awk -F'-1,' '{print "sample1\t"$1"\tcellgroup"$2}' > cell_barcode.tsv
+$ wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_analysis.tar.gz
+$ tar zxf pbmc_1k_v3_analysis.tar.gz analysis/clustering/graphclust/clusters.csv
+$ cat analysis/clustering/graphclust/clusters.csv | sed 1d | awk -F'-1,' '{print "sample1\t"$1"\tcellgroup"$2}' > cell_barcode.tsv
 ```
 At last, run scAPA. It usually takes several hours.
 ```
-~/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
+$ ~/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
 ```
 The outputs will be in folder `scAPA_output/`.
 ## Contacts
