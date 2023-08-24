@@ -5,7 +5,7 @@
 scAPA was designed to run under the command line of Linux environment compatible with Julia language and with memory no less than 64G.
 
 ## Installation
-Running scAPA relies on Julia language compiler on Linux OS. First of all, the user needs to install Julia (v1.7+). A binary version of Julia program can be downloaded from the [official website](https://julialang.org/downloads/).
+Running scAPA relies on Julia language compiler on Linux OS. First of all, the user needs to install Julia (v1.6+). A binary version of Julia program can be downloaded from the [official website](https://julialang.org/downloads/).
 
 scAPA can be installed by running the below code in bash:
 ```bash
