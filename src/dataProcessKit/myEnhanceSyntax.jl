@@ -17,7 +17,11 @@ function importpkg(X::AbstractString; preloaded::Bool=false)
     mdnm=Symbol("warpedpkg_$X")
     if !isdefined(Main, mdnm)
         if !preloaded && !isdefined(Main, Symbol(X))
-            eval(Main,Meta.parse("import $X"))
+            try
+                eval(Main,Meta.parse("import $X"))
+            catch
+                eval(Main,Meta.parse("import Pkg; Pkg.add(\"$X\"); import $X"))
+            end            
         end
         mth=join(names(getfield(Main, Symbol(X))),",")
         eval(Main,Meta.parse("""
@@ -31,7 +35,11 @@ end
 function importpkg(X::Symbol; preloaded::Bool=false)
     if !preloaded && !isdefined(Main, X)
         # preloaded && error("Package $X has not been loaded.")
-        eval(Main,Meta.parse("import $X"))
+        try
+            eval(Main,Meta.parse("import $X"))
+        catch
+            eval(Main,Meta.parse("import Pkg; Pkg.add(\"$X\"); import $X"))
+        end            
     end
     getfield(Main, X)::Module
 end
