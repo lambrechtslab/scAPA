@@ -86,7 +86,7 @@ $ wget https://cf.10xgenomics.com/samples/cell-exp/3.0.0/pbmc_1k_v3/pbmc_1k_v3_a
 $ tar zxf pbmc_1k_v3_analysis.tar.gz analysis/clustering/graphclust/clusters.csv
 $ cat analysis/clustering/graphclust/clusters.csv | sed 1d | awk -F'-1,' '{print "sample1\t"$1"\tcellgroup"$2}' > cell_barcode.tsv
 ```
-At last, run scAPA. It usually takes several hours.
+At last, run scAPA. It takes approximately one hour.
 ```
 $ ~/scAPA -g Homo_sapiens.GRCh38.93.gtf -s samplesheet.tsv -c cell_barcode.tsv -o scAPA_output
 ```
