@@ -19,6 +19,7 @@ Or install under julia package environment (press key `]` in Julia REPL):
 The dependent packages and the external tool `StringTie` will be installed automatically. A softlink `~/scAPA` will be created at home directory and you can move it to where you want.
 
 ## Uninstallation
+To uninstall scAPA, you need to remove the scAPA package in julia and clean the softlink.
 ```
 $ julia -e 'using Pkg; Pkg.rm("scAPA")'
 $ unlink ~/scAPA
