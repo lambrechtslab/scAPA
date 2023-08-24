@@ -5,6 +5,7 @@ include("dataProcessKit/myBioXAM.jl")
 using DelimitedFiles
 using ArgParse
 using Distributed
+using JLD2
 using .dataProcessKit
 using .myBioXAM
 

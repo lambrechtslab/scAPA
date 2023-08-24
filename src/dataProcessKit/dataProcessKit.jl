@@ -2,7 +2,7 @@ __precompile__()
 
 module dataProcessKit
 # using SortingAlgorithms
-using SortingLab, JLD2
+using SortingLab
 
 include("compatible.jl")
 export randperm
