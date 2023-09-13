@@ -1,8 +1,8 @@
 # scAPA
-**s**ingle-**c**ell **A**lternative s**P**licing **A**nalyzer (scAPA) is a bioinformatic program to detect and quantify alternative splicing events (ASEs) from 10x Genome single-cell RNAseq data. scAPA detects reads spanning exon-exon junctions within a gene, while discovering all types of ASEs without totally rely on transcript annotation, quantifying ASEs on cell level based on barcodes,  adopting the uneven read coverages, and incorporating unique molecular identifier (UMI) information to handle single-cell data (Figure 1d; see Methods). scAPA only considers ASEs supported by at least 10 junction reads, allowing both a reference and alternative AS isoform to be defined.
+**s**ingle-**c**ell **A**lternative s**P**licing **A**nalyzer (scAPA) is a bioinformatic program to detect and quantify alternative splicing events (ASEs) from 10x Genome single-cell RNAseq data. scAPA detects reads spanning exon-exon junctions within a gene, while discovering all types of ASEs without relying entirely on transcript annotation, quantifying ASEs on cell level based on barcodes,  adopting the uneven read coverages, and incorporating unique molecular identifier (UMI) information to handle single-cell data (Figure 1d; see Methods). scAPA only considers ASEs supported by at least 10 junction reads, allowing both a reference and alternative AS isoform to be defined.
 
 ## System requirements
-scAPA was designed to run under the command line of Linux environment compatible with Julia language and with memory no less than 64G.
+scAPA was designed to run under the command line of Linux environment compatible with Julia language and with at least 64G memory.
 
 ## Installation
 Running scAPA relies on Julia language compiler on Linux OS. First of all, the user needs to install Julia (v1.6+). A binary version of Julia program can be downloaded from the [official website](https://julialang.org/downloads/).
@@ -27,11 +27,11 @@ $ unlink ~/scAPA
 
 ## Usage
 ### Input data preparation
-Before analysis by scAPA, fastq files generated from 10x Genome scRNAseq platform should be firstly mapped by `cellranger`, and recommendedly analyzed for cell types. Three types of files are needed for the scAPA:
+Before analysis by scAPA, fastq files generated from 10x Genome scRNAseq platform should be mapped by `cellranger`, and optionnaly but highly recommended cell types should be identified. Three types of files are needed for scAPA:
 1. The bam files output from `cellranger`.
 2. A sample sheet tsv file with two columns: sample ID (unique and no blanks), and bam file path. See example in `test/10x/samplesheet.tsv`.
 3. A genome annotation file (gtf). This file is suggested to use the same version as in the previous `cellranger`. For example, the Ensembl v93 human annotation gtf file can be downloaded from [here](https://ftp.ensembl.org/pub/release-93/gtf/homo_sapiens/Homo_sapiens.GRCh38.93.gtf.gz). `.gz` compressed file is accepted.
-4. (Optional but recommended) A tsv file for the cell group information, which should be composited by three columns: sample ID (identical to file #2), cell barcode (do not include `-1` at the end of barcode), and name of cell group (like cell type as an example). This file can be in comparessed in .gz format. If this file is provided, scAPA will calculate PSI and counts for each cell groups. Considering read coverage on single-cell level is limited, appropriately grouping cells could largely facilitate downstream analysis.
+4. (Optional but recommended) A tsv file for the cell group information, which should be composited by three columns: sample ID (identical to file #2), cell barcode (do not include `-1` at the end of barcode), and name of cell group (like cell type as an example). This file can be in compressed in .gz format. If this file is provided, scAPA will calculate PSI and counts for each cell groups. Considering read coverage on single-cell level is limited, appropriately grouping cells could largely facilitate downstream analysis.
 5. (Optional) A de-nova assembled GTF file. If missing, scAPA will generate one based on the input bam files and annotation files using `StringTie`.
 ### Run scAPA program
 ```bash
