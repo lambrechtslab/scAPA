@@ -2,20 +2,20 @@
 #[[ tb tb! ds ds! tbexp tbexp! ]]
 #Dict{String,Any}(...)=tb|ds([Dict, ]"key1"=>val1, "key2"=>val2; key3=val3, key4=val4, ...)
 # ... = tb|ds([Dict, ]c"key1, key2, ..." => (val1, val2, ...), ...; ...)
-# ... = tb|ds([Dict, ]("key1"|:, ("key2", "key3")) => (value1|Dict, (value2, value3)), ...; ...)
+# ... = tb|ds([Dict, ]("key1"|:, nothing, ("key2", "key3")) => (value1|Dict, ignored, (value2, value3)), ...; ...)
 # ... = tb|ds(A, B; ...) = tb|ds(A => B; ...) #Only support 2-3 input.
 # ... = tb!|ds!(Dict, ...; ...) #The inputed Dict will be modified.
-# ... = (value1, value2, ...) |> tb|ds(c"key1, key2, ...") #tb|ds output a function for pipeline convenience. Recur supported also.
+# ... = (value1, value2, ...) |> tb|ds(c"key1, key2|_, ...") #tb|ds output a function for pipeline convenience. Recur supported also.
 # ... = theOnlyValue |> tb|ds("theOnlyKey")
 # ... = tbexp|tbexp!( multi_rows_table, one_row_tb_params...;...) # Row-repeat the all-but-first inputed table and merge with the first inputs. At least two inputs. Conflicted keys will be covered by the rightest one.
 # ... = tbexp( one_row_table, multi_rows_tb_params...;...) # [ Abolished with warning! ] Row-repeat the first inputed table and merge with other inputs. At least two inputs. Conflicted keys will be covered by the rightest one.
 # ... = tbexp(("field"=>value, ...); ...) | tbexp((field=value, ...); ...) #Also acceptable.
 #Create a table-style Dict (Dict{String,Any}()). In tb, the rownum will be checked but not in ds.
-#In the => mode, if any key is a Colon (:) rather than a string, the value should be a Dict, and it will be merged to the table by dictconc.
+#In the `=>' mode, if any key is a Colon (:) rather than a string, the value should be a Dict, and it will be merged to the table by dictconc; if any key is nothing rather than a string, the paired value will be ignored, and its row number will not be checked.
 #In tbexp(), if any field names are exists in both repeating-data and non-repeating-data, only the non-repeating-data will be used, and no error or warning will occured. However, using this feature is NOT recommended as all the data will be repeated firstly without checking the fieldnames.
 #For tb|tbexp(T1::Dict, key=T2), the row consistency for both T1 and T2 will be checked. However, for tb!|tbexp!(T1::Dict, key=T2), the row consistency of T1 will NOT be checked. You can use tb!(T, key=value) as a safe way of T["key"]=value.
 #See also: dictfun, reprow, tb2DataFrame, pandasDF, rec, fd*
-#Xiong Jieyi, February 9, 2015 >May 27, 2015>Jun 3, 2015>Nov 4, 2015>Nov 4, 2015>23 Jul 2017>18 Dec 2018>18 Apr 2020>13 Jul 2020>25 Apr 2022
+#Xiong Jieyi, February 9, 2015 >May 27, 2015>Jun 3, 2015>Nov 4, 2015>Nov 4, 2015>23 Jul 2017>18 Dec 2018>18 Apr 2020>13 Jul 2020>25 Apr 2022>26 Oct 2023
 
 export tb, ds, tb!, ds!, tbexp, tbexp!
 
@@ -36,8 +36,18 @@ function __deepzip__(P::Pair)
     isa(P[1], Union{AbstractVector, Tuple}) || error("Key of a Table should always be String.")
     length(P[1])==length(P[2]) || error("Two inputs cannot be paired due to different lengths or strcutures.")
     O=Pair{Union{String, Colon}, Any}[]
-    for (a, b) in zip(P[1], P[2])
-        append!(O, __deepzip__(a=>b))
+    if isa(P[1], Tuple)
+        for (a, b) in zip(P[1], P[2])
+            if !isnothing(a) #Added in 25 Oct 2023
+                append!(O, __deepzip__(a=>b))
+            end
+        end
+    else
+        for (a, b) in zip(P[1], P[2])
+            # if a!="_" #It may not be a good idea to support "_" as an ignore marker while all other strings not.
+            append!(O, __deepzip__(a=>b))
+            # end
+        end
     end
     O
 end
@@ -523,7 +533,7 @@ end
 #{{ @with @withlet @withrow @filterrow
 #[[ @with @withlet @withrow @filterrow ]]
 #... = @with|@withlet dict any-cmd-with-$field-or-$"field"-or-$_
-#  A lasy way to use dict["field"]. In the second parameter, any $field or $"field" will be replaced as dict["field"]. $_ will be replaced as dict itself. `dict' must be in string-like keys.
+#  A lasy way to use dict["field"]. In the second parameter, any $field or $"field" will be replaced as dict["field"]. $_ will be replaced as dict itself. `dict' must be in string-like keys. In the nested @with, $$abc will be parsed to $abc.
 #  @withlet: the 1st input can also be an expression, and the commands will be run in a let...end block.
 #  @with: the 1st input can only be a variable name.
 #anonymous_fun = @with( (..., $_, ...) -> any-cmd-with-$field-or-$"field"-or-$_ )
@@ -544,7 +554,7 @@ end
 # For @withrow and @filterrow, the 1st input can either be a variable name or be an expression.
 # For all macros, the first input could be either a variable name or an expression.
 #See also: @d_str, @dd_str, @rec
-#Xiong Jieyi, 27 Oct 2017 > 7 Jan 2022 > 15 Feb 2022 > 5 Jan 2023
+#Xiong Jieyi, 27 Oct 2017 > 7 Jan 2022 > 15 Feb 2022 > 5 Jan 2023 >17 Jul 2024
 
 macro with(T::Symbol, X::Expr)
     function recur(A::Vector, I::Int)
@@ -559,6 +569,9 @@ macro with(T::Symbol, X::Expr)
                 C.head=:ref
                 C.args=Any[T, string(C.args[1])]
             end
+        elseif C.head==:$ && length(C.args)==1 && isa(C.args[1], Expr) && C.args[1].head==:$ && length(C.args[1].args)==1 && (isa(C.args[1].args[1], Symbol) || isa(C.args[1].args[1], String))
+            # In nested @with, $$xxx->$xxx. 17 Jul 2024
+            C.args=C.args[1].args
         else
             for i=1:length(C.args)
                 recur(C.args, i)
@@ -587,6 +600,9 @@ macro with(X::Expr)
                 else
                     A[I]=internalT
                 end
+            elseif C.head==:$ && length(C.args)==1 && isa(C.args[1], Expr) && C.args[1].head==:$ && length(C.args[1].args)==1 && (isa(C.args[1].args[1], Symbol) || isa(C.args[1].args[1], String))
+            # In nested @with, $$xxx->$xxx. 17 Jul 2024
+                C.args=C.args[1].args
             else
                 C.head=:ref
                 C.args=Any[internalT, string(C.args[1])]
@@ -679,6 +695,9 @@ macro withrow(T::Union{Symbol, Expr}, X::Expr)
                 C.head=:ref
                 C.args=Any[internalT, string(C.args[1])]
             end
+        elseif C.head==:$ && length(C.args)==1 && isa(C.args[1], Expr) && C.args[1].head==:$ && length(C.args[1].args)==1 && (isa(C.args[1].args[1], Symbol) || isa(C.args[1].args[1], String))
+            # In nested @with, $$xxx->$xxx. 17 Jul 2024
+            C.args=C.args[1].args
         else
             for i=1:length(C.args)
                 recur(C.args, i)
@@ -729,6 +748,7 @@ export @with, @withlet, @withrow, @filterrow
 # ...  = @rec[_i](Table, $field.>0)
 #Get the rows of each element of Dict (rec), or remove the rows of Dict (rec_i)
 #The difference between rec and getrow: rec will check if the input is a table firstly, but getrow will not.
+#17 Jul 2024: For @rec[_i] nested with @withlet, $$abc will be parsed to $abc similar as @with[let].
 #See also: getrow, fd, fd_i, ft, sk, dictconc, tbx, dict2tuple
 #Xiong Jieyi, 8 Jul 2014>28 Sep 2014>October 16, 2014>14 Nov 2017
 
@@ -746,6 +766,9 @@ macro rec(T, C)
         if C.head==:$ && length(C.args)==1 && (isa(C.args[1], Symbol) || isa(C.args[1], String))
             C.head=:ref
             C.args=Any[T,string(C.args[1])]
+        elseif C.head==:$ && length(C.args)==1 && isa(C.args[1], Expr) && C.args[1].head==:$ && length(C.args[1].args)==1 && (isa(C.args[1].args[1], Symbol) || isa(C.args[1].args[1], String))
+            # In nested @with, $$xxx->$xxx. 17 Jul 2024
+            C.args=C.args[1].args
         else
             for (i, v) in enumerate(C.args)
                 if isa(v, Expr)
@@ -763,6 +786,9 @@ macro rec_i(T, C)
         if C.head==:$ && length(C.args)==1 && (isa(C.args[1], Symbol) || isa(C.args[1], String))
             C.head=:ref
             C.args=Any[T,string(C.args[1])]
+        elseif C.head==:$ && length(C.args)==1 && isa(C.args[1], Expr) && C.args[1].head==:$ && length(C.args[1].args)==1 && (isa(C.args[1].args[1], Symbol) || isa(C.args[1].args[1], String))
+            # In nested @with, $$xxx->$xxx. 17 Jul 2024
+            C.args=C.args[1].args
         else
             for (i, v) in enumerate(C.args)
                 if isa(v, Expr)
@@ -780,8 +806,9 @@ export rec, rec_i, @rec, @rec_i
 
 #{{ dictconc dictconc!
 #[[ dictconc dictconc! ]]
-#CombindDict = dictconc(A::Dict, B::Dict, ...; delconflict=false | aprefix="Pre-"|function, bprefix=... | anest="akey", bnest="bkey")
-#          A = dictconc!(A::Dict, B::Dict, ...; ...)
+# CombindDict = dictconc(A::Dict, B::Dict; delconflict=false | aprefix="Pre-"|function, bprefix=... | anest="akey", bnest="bkey")
+# ... = dictconc(A::Dict, B::Dict, C::Dict, ...; delconflict=false) #Other keywords are not supported.
+#   A = dictconc!(A::Dict, ...; ...) #Directly merge other dicts to A.
 #Combind all the fields of two dictionaries. If two field's values with the same fieldnames are inconsistent, a error will occur in default, or this field will be deleted (delconflict=true) or renamed (a/bprefix=...). aprefix/bprefix can also be a function, similar as rename!(function, ...). aprefix/bprefix can only be used when input Dict number = 2. If anest or bnest was assigned, the conflict keys will be nested keys with the given names.
 #In dictconc!, A will be added B's fields and be outputed, but B is ALWAYS intact (even when bprefix=... is assigned).
 #See also: vcatr, vcatr_with, rec, fd, fd_i, ft, tbx, tbuniq, tbuniq_i, dict2tuple, tbcomp, rename!, dictshare
@@ -886,20 +913,21 @@ end
 #{{ tbuniq, tbuniq_i
 #[[ tbuniq tbuniq_i ]]
 # UniqTb=tbuniq(Tb)
-# UniqTb=tbuniq(Tb, fields|nothing*[, "field"|fields_vec|Regex => function, ...]; trim=false, check=false, stable=false)
-#  ...  =tbuniq(function, Tb, fields, "field"=>:, ...; ...) # ":" will be replaced by the first funciton input.
+# UniqTb=tbuniq(Tb, fields|nothing*[, "field"|fields_vec|Regex => function, ...]; trim|trim_recur=false, check=false, stable=false)
+#  ...  =tbuniq(function, Tb, fields, field(_vec)=>:, ...; ...) # ":" will be replaced by the first funciton input.
 # UniqTb=tbuniq_i(Tb, ignore_fields)
 # Get the unique table by the given fields. If the fields is omitted in tbuniq, function using all the fields.
-# If trim or check is true, function will check each of non-key-fields to make sure it can be unique following the key-fields. If failed, function will remove this field (trim=true) or throw an error (check=true).
-# When "field"|Vector|Regex=>function is given, these fields will be firstly excluded in the unique step, and then be added as To["field"]=grpfun(fun, ..., Ti["field"]). If any Regex is used, function require either trim=true or check=true should also be set just for fool-proofing.
+# If trim, trim_recur or check is true, function will check each of non-key-fields to make sure it can be unique following the key-fields. If failed, function will remove this field (trim=true) or throw an error (check=true).
+# trim_recur=true will recursly trim the nested table, while trim=true regards the nested table as a whole.
+# When "field"|Vector|Regex=>function is given, these fields will be firstly excluded in the unique step, and then be added as To["field"]=grpfun(fun, ..., Ti["field"]). If any Regex is used, function require either trim(_recur)=true or check=true should also be set just for fool-proofing.
 # * Arg#2=nothing means all fields except the ones specificly handled in 3+ args. Only allowed with 3+ args.
 #See also: coo2mx, tbcomp, grpfun
-#Xiong Jieyi, 30 Aug 2014>7 Oct 2014>Sep 8, 2017>9 May 2018>26 Aug 2019>22 Apr 2020>30 Jul 2021
+#Xiong Jieyi, 30 Aug 2014>7 Oct 2014>Sep 8, 2017>9 May 2018>26 Aug 2019>22 Apr 2020>30 Jul 2021>8 Jul 2024
 
 tbuniq(T::Dict{Tk,}; stable::Bool=false) where {Tk<:AbstractString} =
     rec(T, uniqr(Tuple(values(T)); stable=stable)[1]) 
 
-function tbuniq(T::Dict{Tk,}, fld, Pr::Pair...; stable::Bool=false, trim::Bool=false, check::Bool=false) where {Tk<:AbstractString}
+function tbuniq(T::Dict{Tk,}, fld, Pr::Pair...; stable::Bool=false, trim::Bool=false, trim_recur::Bool=false, check::Bool=false) where {Tk<:AbstractString}
     fg=nothing
     if isempty(Pr)
         isnothing(fld) && error("Arg#2 = nothing is not allowed when no \"field\"=>function behand. Just use tbuniq(T) instead of tbuniq(T, nothing)")
@@ -915,30 +943,44 @@ function tbuniq(T::Dict{Tk,}, fld, Pr::Pair...; stable::Bool=false, trim::Bool=f
             end
         end
         T=fd_i(T, vcat(Pr_fds...,))
-        # T=fd_i(T, [map(x->isa(x.first, AbstractString) ? (x.first,) : x.first::Union{AbstractVector, Tuple}, Pr)...,])
         fg=isnothing(fld) ? fastgrp(dict2tuple(T); stable=stable) : fastgrp(dict2tuple(T, fld); stable=stable)
     end
-    T=if trim || check
+    T=if trim || check || trim_recur
         isnothing(fld) && error("Arg#2 = nothing is not allowed when trim=true or check=true.")
         otherfd=setdiff(collect(keys(T)), fld)
         if isnothing(fg)
             fg=fastgrp(dict2tuple(T, fld); stable=stable)
         end
-        isuni=map(otherfd) do ofd
-            all(isrowsame, eachgrp(fg, T[ofd]))
-        end
-        if check
-            if !all(isuni)
-                t=otherfd[.!isuni]
-                if length(t)>50
-                    t=[t[1:50];"..."]
+        if trim_recur #Added in 8 Jul 2024
+            check && error("check=true conflicts with trim_recur=true.")
+            function recurfun(cT::Dict{<:AbstractString,})
+                nT=typeof(cT)()
+                for (ky, val) in cT
+                    if isa(val, Dict{<:AbstractString,}) && !isempty((t=recurfun(val);))
+                        nT[ky]=t
+                    elseif all(isrowsame, eachgrp(fg, val))
+                        nT[ky]=getrow(val, fg.grpfirsti)
+                    end
                 end
-                error("Below fields are not intra-group unique: "*join(t, ", "))
+                nT
             end
-            # rec(T, uniqr(dict2tuple(T, fld); stable=stable)[1])
-            rec(T, fg.grpfirsti) #Changed in 22 Apr 2020
+            merge!(getrow(fd(T, fld), fg.grpfirsti), recurfun(fd(T, otherfd)))
         else
-            rec(fd(T, [fld; otherfd[isuni]]), fg.grpfirsti)
+            isuni=map(otherfd) do ofd
+                all(isrowsame, eachgrp(fg, T[ofd]))
+            end
+            if check
+                if !all(isuni)
+                    t=otherfd[.!isuni]
+                    if length(t)>50
+                        t=[t[1:50];"..."]
+                    end
+                    error("Below fields are not intra-group unique: "*join(t, ", "))
+                end
+                getrow(T, fg.grpfirsti)
+            else
+                getrow(fd(T, [fld; otherfd[isuni]]), fg.grpfirsti)
+            end
         end
     else
         if isnothing(fg)
@@ -964,7 +1006,7 @@ function tbuniq(T::Dict{Tk,}, fld, Pr::Pair...; stable::Bool=false, trim::Bool=f
     T
 end
 tbuniq(T::Dict{Tk,}, fld::AbstractString, Pr::Pair...; kw...) where {Tk<:AbstractString} = tbuniq(T, [fld], Pr...; kw...)
-tbuniq(fun::Function, T::Dict{Tk,}, fld, Pr1::Pair{Tk2, Colon}, Pr::Pair...; kw...)  where {Tk<:AbstractString, Tk2<:AbstractString} =tbuniq(T, fld, Pr1.first=>fun, Pr...; kw...)
+tbuniq(fun::Function, T::Dict{<:AbstractString,}, fld, Pr1::Pair{<:Union{<:AbstractString, <:AbstractVector{<:AbstractString}}, Colon}, Pr::Pair...; kw...)=tbuniq(T, fld, Pr1.first=>fun, Pr...; kw...)
 
 tbuniq_i(T::Dict{Tk,},fld) where {Tk<:AbstractString} =
     rec(T,uniqr(tuple(values(fd_i(T,fld))...))[1])
@@ -1114,8 +1156,8 @@ end
 #             auniq=false, buniq=false, afull=false, bfull=false, akeep=false, bkeep=false,
 #             exp=:AB(Default)|:A|:none, order=:none(Default)|:A|:B,
 #             aprefix="Pre-"|function, bprefix=..., rename_conflict=true, must_rename=Set(fields)|fields_vec|"1field", delconflict=false,
-#             fillempty=:none(Default)|:A|:B|:AB, emptyA=ds(...)|missing, emptyB=... )
-#outA, outB = tbx(...; nomerge=true, ...)
+#             fillempty=:none(def)|:A|:B|:AB, emptyA=ds(...)|missing, emptyB=... )
+#outA, outB = tbx(...; nomerge=true, rmdup=:none(def)|:A|:B, ...)
 #key could be "fieldname", ("fieldname_A", "fieldname_B"), (group1, group2), (group1, "fieldname_B"). If the key is omitted, the only shared key will be used.
 #Or ... = tbx (A, B;< key=c"key1, key2, ..."|"the_only_key" >|< akey=[c]"...", bkey=[c]"..." >, ...)
 #Merge two tables together. When key=(keyA, keyB), the keyB will be not in the output.
@@ -1124,14 +1166,15 @@ end
 #aprefix/bprefix can also be a function, similar as rename!(function, ...). 
 #emptyA and emptyB is Dict for the empty values in A and B. If any fields in emptyA/B are missing, emptyval(...) will be used. Note the field names in emptyA/B should be as the names in the input A/B, rather than the modified names in the output.
 #When nomerge=true, tbx() will output two tables with marched rows. The key field(s) in B will be kept, and `delconflict` should only be false.
+#rmdup=:A or :B: remove duplicated fields (identical values by isequal()) in either one of two outputs in nomerge=true model.
 #See also: vcatr, rec, fd, fd_i, ft, tbx, tbuniq, tbuniq_i, dictconc, dictconc!, tbcomp, dictshare
-#Xiong Jieyi, 16 May 2014>11 Sep 2014>December 7, 2014>March 26, 2015>Jun 2, 2015>14 Oct 2017>13 Jan 2018>13 Mar 2018>7 Feb 2019>17 Sep 2019>8 Jul 2020
+#Xiong Jieyi, 16 May 2014>11 Sep 2014>December 7, 2014>March 26, 2015>Jun 2, 2015>14 Oct 2017>13 Jan 2018>13 Mar 2018>7 Feb 2019>17 Sep 2019>8 Jul 2020>8 Jul 2024
 
 export tbx
 function __tbx__(A::Dict, B::Dict, key::Tuple{Group,Group},
              keynameA::AbstractVector{T1}, keynameB::AbstractVector{T2};
              exp::Symbol=:AB, fillempty::Symbol=:none,
-             auniq::Bool=false, buniq::Bool=false, afull::Bool=false, bfull::Bool=false, akeep::Bool=false, bkeep::Bool=false, order::Symbol=:none, aprefix::Union{AbstractString, Function}="", bprefix::Union{AbstractString, Function}="", delconflict::Bool=false, rename_conflict::Bool=true, must_rename=Set{String}(), emptyA::Union{Dict, Missing}=ds(), emptyB::Union{Dict, Missing}=ds(), nomerge::Bool=false) where {T1<:AbstractString,T2<:AbstractString}
+             auniq::Bool=false, buniq::Bool=false, afull::Bool=false, bfull::Bool=false, akeep::Bool=false, bkeep::Bool=false, order::Symbol=:none, aprefix::Union{AbstractString, Function}="", bprefix::Union{AbstractString, Function}="", delconflict::Bool=false, rename_conflict::Bool=true, must_rename=Set{String}(), emptyA::Union{Dict, Missing}=ds(), emptyB::Union{Dict, Missing}=ds(), nomerge::Bool=false, rmdup::Symbol=:none) where {T1<:AbstractString,T2<:AbstractString}
 
     # Input check
     if !isa(must_rename, Set)
@@ -1293,8 +1336,22 @@ function __tbx__(A::Dict, B::Dict, key::Tuple{Group,Group},
     end
     if nomerge
         delconflict && error("nomerge=true conflicts with delconflict=true.")
+        if rmdup!=:none
+            if rmdup==:B
+                filter!(oB) do (k, v)
+                    !(in(k, keynameB) || (haskey(oA, k) && isequal(v, oA[k])))
+                end
+            elseif rmdup==:A
+                filter!(oA) do (k, v)
+                    !(in(k, keynameA) || (haskey(oB, k) && isequal(v, oB[k])))
+                end
+            else
+                error("Invalid rmdup=$rmdup. Only :A, :B or :none is allowed.")
+            end
+        end
         (oA, oB)
     else
+        rmdup==:none || error("rmdup=$rmdup conflicts with nomerge=true.")
         dictconc!(oA,oB; delconflict=delconflict)
     end
 end

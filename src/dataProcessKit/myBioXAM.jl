@@ -2,48 +2,55 @@ module myBioXAM
 using Reexport
 @reexport using XAM, GenomicFeatures
 
-include("dataProcessKit.jl")
-using .dataProcessKit
-
+using my
 mypth=joinpath(homedir(), "myjulia")
 include(joinpath(mypth, "compatible.jl"))
 
 #{{ bamReadCount
 #[[ bamReadCount ]]
 # using GenomicFeatures, XAM #or using Bio.Align #Required.
-# readnum, site_len = bamReadCount(indexed_bam_file, (SiteChr, SitePos[, SiteStrand]); revstrand=false, UMI="", rm_overlap_sites=true, read_span_site=false, readfilter= rd->rd["NH"]::UInt8==0x01)
+# readnum, site_len = bamReadCount(indexed_bam_file, (SiteChr, SitePos[, SiteStrand]); revstrand=false, UMI=nothing, UMI2=nothing, UMI_UMI2_linker=" ", rm_overlap_sites=true, read_span_site=false, readfilter= rd->rd["NH"]::UInt8==0x01)
 # readnum, site_len, site_grp = bamReadCount(...; sitegrp=Group, ...)
-# readnum, site_len, site_index::Int, smp_barcode = bamReadCount(...; smpBC="BC_field", ...)
+# readnum, site_len, site_index::Int, smp_barcode|smpBCfun_output = bamReadCount(...; smpBC="BC_field", smpBCfun=..., ...)
 # readnum, site_len, site_grp, smp_barcode = bamReadCount(...; smpBC="BC_field",  sitegrp=Group, ...)
 # Counting overlapped unique-mapped read number in each site or site group. A read overlapped with more than one site in a site group will only be counted once.
 # The read is counted by "touch" model, i.e., a read which only parly overlapped with a site will also be counted. Only read with tag "NH:i:1" can be counted, which aims to filter uniquely mapped reads.
 # `UMI` is the field of UMI barcode. e.g., for 10x data, set UMI="UB". When UMI is setted, the outputted readnum is actually the unique UMI number for the reads touched a site or a site group. Otherwise, the outputted readnum is the number of unique read ID.
+# `UMI2` It is allowed to set two UMI fields. The two UMI fields will be concatenated by `UMI_UMI2_linker`.
 # `smpBC` is the sample barcode. e.g. for 10x data, set smpBC="CB" to get the gene read number of every cell x every gene.
 # Tip: for 10x 5'-scRNAseq data, set UMI="UB", smpBC="CB", revstrand=true .
+# `smpBCfun` custom function to modify sample barcode. Its output should either be a String or nothing (ignore this read). 
+# When both `smpBCfun` and `UMI` are assigned, the default UMI2 value is smpBC in order to make sure that the result read number is restrictly equal to the sum of all cells in each type in case the sumBCfun merged barcodes (e.g.  converting BC to cell type in 10x data). In case smpBCfun is an one-to-one mapping function (e.g. UMI="UB", smpBCfun=x->replace(x, r"\-1$"=>"")), setting UMI2=nothing can save memery without accuracy compromise.
 # When sitegrp is given, the read will be counted by group. Outputted readnum is the number of unique read ID or UMI for all the reads touched any sites of a group.
 # When rm_overlap_sites=true, the site segments overlapped by different site groups will be removed in advance. These parts will also not be counted for `site_len`.
 # when read_span_site=true, only the read fully span a site will be counted. e.g., the site could be splicing site +/- anchor length in order to count non-junction reads in this mode.
 # readfilter=... assigns a function to filter reads. The input is read object in XAM.jl. The default one is used to filter out multiple mapped reads in STAR bam file. It need to be changed for other aligner. e.g., for Bowtie2 output, set:
 # readfilter= rd -> !haskey(rd, "XS") || rd["AS"]::Union{UInt8, UInt16} > rd["XS"]::Union{UInt8, UInt16}
 # for BWA output, set:
-# readfilter=rd->(BAM.flag(rd) & 0x400)==0 && !haskey(rd, "XA") && !haskey(rd, "SA")
+# readfilter=rd->(BAM.flags(rd) & 0x400)==0 && !haskey(rd, "XA") && !haskey(rd, "SA")
 # BWA will assign an arbitrary location on unmapped reads by BWA. See https://www.biostars.org/p/141014/ . But it won't be a problem of bamReadCount() since function will check BAM.ismapped() anyhow. 10 Jun 2021
 # See also: bamReadLoop, bamJuncCount, bamJuncCount_10x
-# Xiong Jieyi, 27 Sep 2019 > 27 Feb 2020 >10 Jun 2021
+# Xiong Jieyi, 27 Sep 2019 > 27 Feb 2020 >10 Jun 2021>12 Jan 2024
 
 export bamReadCount
 function bamReadCount(bamfn::AbstractString, Site::Tuple;
                       revstrand::Bool=false, rm_overlap_sites::Bool=true,
                       readfilter::Function=rd->rd["NH"]::UInt8==0x01,
-                      UMI::String="", smpBC::String="", is10x::Bool=false, sitegrp::Union{Group, Nothing}=nothing, read_span_site::Bool=false)
+                      UMI::Union{String, Nothing}=nothing,
+                      smpBC::Union{String, Nothing}=nothing, smpBCfun=nothing,
+                      UMI2::Union{String, Nothing}=!isnothing(smpBCfun) && !isempty(UMI) ? smpBC : nothing,
+                      UMI_UMI2_linker::String=" ",
+                      sitegrp::Union{Group, Nothing}=nothing, read_span_site::Bool=false,
+                      is10x::Bool=false)
     if is10x #Abolished in 27 Mar 2020
         @error("is10x=true has abolished. Use UMI=\"UB\", smpBC=\"CB\" instead.")
-        UMI="UB"
-        smpBC="CB"
+        # UMI="UB"
+        # smpBC="CB"
     end
     # BAM=importpkg(:XAM, preloaded=true).BAM::Module
     # eachoverlap=importpkg(:GenomicFeatures, preloaded=true).eachoverlap::Function
-    isBC=!isempty(smpBC)
+    isBC=!isnothing(smpBC)
+    isSmpBCfun=!isnothing(smpBCfun)
     isstrand=length(Site)==3
     if isstrand
         Site::Tuple{AbstractVector{String}, AbstractMatrix{Int}, AbstractVector{Char}}
@@ -93,7 +100,12 @@ function bamReadCount(bamfn::AbstractString, Site::Tuple;
     
     siteGrpNum=rownum(siteLenTb)
 
-    isUMI=!isempty(UMI)
+    isUMI=!isnothing(UMI)
+    isUMI2=!isnothing(UMI2)
+    if !isUMI && isUMI2
+        error("UMI2 can be assigned only when UMI is assigned.")
+    end
+    
     if isBC
         bcpool=Dict{String, Set{String}}()
         grpfun1=grpfunwith
@@ -113,10 +125,13 @@ function bamReadCount(bamfn::AbstractString, Site::Tuple;
                 #Version after 23 Sep 2020 >>>
                 # rd["NH"]::UInt8==0x01 || continue
                 BAM.ismapped(rd) || continue #This filter is necessary for BWA mapping, because unmapped reads could stil be here as an arbitrary (wrong) location could be assigned on unmapped reads by BWA. See https://www.biostars.org/p/141014/ (10 Jun 2021)
-                readfilter(rd) || continue
+                (!isBC || haskey(rd, smpBC)) || continue
                 (!isUMI || haskey(rd, UMI)) || continue
+                (!isUMI2 || haskey(rd, UMI2)) || continue
+                readfilter(rd) || continue
+                
                 if cstrand!='.'
-                    isPEread2=(BAM.flag(rd) & 0x81) == 0x81
+                    isPEread2=(BAM.flags(rd) & 0x81) == 0x81
                     readpositive=xor(BAM.ispositivestrand(rd), isPEread2)
                     # @assert !xor(rd["XS"]=='+', readpositive) #Only for debug. Should be removed. 23 Sep 2020
                     if xor(readpositive, xor((cstrand=='+'), revstrand))
@@ -154,19 +169,26 @@ function bamReadCount(bamfn::AbstractString, Site::Tuple;
                 end
                 if touched
                     rdid=if isUMI
-                        rd[UMI]::String
+                        if isUMI2
+                            (rd[UMI]::String) * UMI_UMI2_linker * (rd[UMI2]::String)
+                        else
+                            rd[UMI]::String
+                        end
                     else
-                        BAM.tempname(rd)
+                        BAM.tempname(rd)::String
                     end
                     if isBC
-                        if haskey(rd, smpBC)
-                            cbc=rd[smpBC]
+                        # if haskey(rd, smpBC)
+                        cbc0=rd[smpBC]::String
+                        cbc=isSmpBCfun ? smpBCfun(cbc0)::Union{String, Nothing} : cbc0
+                        if !isnothing(cbc)
                             if haskey(bcpool, cbc)
                                 push!(bcpool[cbc], rdid)
                             else
                                 bcpool[cbc]=Set{String}([rdid])
                             end
                         end
+                        # end
                     else
                         push!(rdpool, rdid)
                     end
@@ -235,7 +257,7 @@ function bamReadLoop(dofun::Function, bamfn::AbstractString, Site::Union{Tuple{A
         BAM.ismapped(rd) || return (false, nothing)
         readfilter(rd) || return (false, nothing)
         if cstrand!='.'
-            isPEread2=(BAM.flag(rd) & 0x81) == 0x81
+            isPEread2=(BAM.flags(rd) & 0x81) == 0x81
             readpositive=xor(BAM.ispositivestrand(rd), isPEread2)
             if xor(readpositive, xor((cstrand=='+'), revstrand))
                 return (false, nothing)
@@ -342,7 +364,7 @@ end
 # readfilter=... assigns a function to filter reads. The input is read object in XAM.jl. The default one is used to filter out multiple mapped reads in STAR bam file. It need to be changed for other aligner. e.g., for Bowtie2 output, set:
 # readfilter= rd -> !haskey(rd, "XS") || rd["AS"]::Union{UInt8, UInt16} > rd["XS"]::Union{UInt8, UInt16}
 # for BWA output, set:
-# readfilter=rd->(BAM.flag(rd) & 0x400)==0 && !haskey(rd, "XA") && !haskey(rd, "SA")
+# readfilter=rd->(BAM.flags(rd) & 0x400)==0 && !haskey(rd, "XA") && !haskey(rd, "SA")
 # See also: bamJuncCount_10x, bamReadCount, bamReadLoop
 # 19 Sep 2019 > 27 Sep 2019 > 20 Feb 2020 > 6 Apr 2020 > 26 Jul 2021
 
@@ -522,5 +544,5 @@ end
 
 #}}
 
-# addhelpfromfile(@__FILE__, inmodule=@__MODULE__)
+addhelpfromfile(@__FILE__, inmodule=@__MODULE__)
 end

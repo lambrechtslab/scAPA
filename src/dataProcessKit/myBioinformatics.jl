@@ -1212,11 +1212,21 @@ end
 #       trans_name="",
 #       protid="",
 #       exnid=""
-#If additional fields are needed, the 2-N parameters should be (OutFieldName::AbstractString, GTFFieldName::AbstractString, Function, DefaultValue::Any) format. Only "exon" rows in GTF files are considered. For the rows missed this item, default values will be filled.
+# Only "exon" rows in GTF files are parsed. Any other rows are ignored.
+# `additional_field` is either a string for the name of field, or a NamedTuple in the format as (<field="...">, rename="...", fun=ascii, default=""). All keywords except `field=` are optional. For the rows missed this field, the default value will be filled.
 #See also: readStarSamFile, genome_fasta2jld, parseDemulReport
-#Xiong Jieyi, May 21, 2015 >Jul 30, 2015 >Aug 8, 2015
+#Xiong Jieyi, May 21, 2015 >Jul 30, 2015 >Aug 8, 2015 >31 Jan 2024
 
 export parseGTF
+function parseGTF(fn, field1::Union{AbstractString, NamedTuple}, fields::Union{AbstractString, NamedTuple}...)
+    function fielddata0(;field::AbstractString="", rename::AbstractString=field, fun=ascii, default="")
+        isempty(field) && error("If 2-N arguments is given as NamedTuple, key `field=' is mandatory.")
+        (rename, field, fun, default)
+    end
+    fielddata(field::AbstractString)=(field, field, ascii, "")
+    fielddata(field::NamedTuple)=fielddata0(; field...)
+    parseGTF(fn, fielddata(field1), fielddata.(fields)...)
+end
 function parseGTF(fn, fields::Tuple{AbstractString,AbstractString,Function,Any}...)
     function phasefd(X)
         m=match(r"^\s*(\S+)\s+\"([^\"]*)\"\s*$",X)
@@ -1302,23 +1312,29 @@ end
 
 #{{ writeGTF
 #[[ writeGTF ]]
-#writeGTF(filename, chr|chrno, pos, geneid; strand='.', prefix="chr")
-#Write a simplest GTF file. This GTF file can be used by HTSeq-count. prefix is used in no2chr.
+#writeGTF(filename, chr|chrno, pos, geneid; strand='.', prefix="chr", trans="transcript_id")
+#Write a simplest GTF file. This GTF file can be used by HTSeq-count.
+#prefix is used in no2chr.
+#When trans="..." is given, a tag like ' transcript_id "...";' will be added to each line. It is not necessary for HTSeq-count.
 #See also:no2chr
-#Xiong Jieyi, May 15, 2016
+#Xiong Jieyi, May 15, 2016 > 28 Mar 2024
 
 export writeGTF
-#<v0.6# function writeGTF{T<:Real}(filename::AbstractString,chr::Vector,pos::Matrix{T},geneid::Vector;strand::Union{Void,Vector{Char}}=nothing,prefix="chr")
-function writeGTF(filename::AbstractString,chr::Vector,pos::Matrix{T},geneid::Vector;strand::Union{Void,Vector{Char}}=nothing,prefix="chr") where {T<:Real}
-    if eltype(chr)<:Real
-        chr=no2chr(chr,prefix=prefix)
+function writeGTF(filename::AbstractString, chr::AbstractVector{<:Union{Integer, AbstractString}}, pos::AbstractMatrix{<:Integer}, geneid::AbstractVector{<:AbstractString}; strand::Union{Nothing, AbstractVector{Char}}=nothing, prefix="chr", trans::Union{AbstractVector{<:AbstractString}, Nothing}=nothing)
+    if eltype(chr)<:Integer
+        chr=no2chr(chr, prefix=prefix)
     end
-    if strand==nothing
-        strand=fill('.',length(chr))
+    if isnothing(strand)
+        strand=fill('.', length(chr))
     end
-    open(filename,"w") do fid
-        rowloop(chr,pos,geneid,strand) do cchr,cpos,cgeid,cstrand
-            println(fid,"$cchr\t.\texon\t$(cpos[1])\t$(cpos[2])\t.\t$cstrand\t.\tgene_id \"$cgeid\";")
+    addtxts=if isnothing(trans)
+        fill("", length(chr))
+    else
+        f" transcript_id \"$1\";".(trans)
+    end
+    open(filename, "w") do fid
+        rowloop(chr,pos,geneid,strand,addtxts) do cchr,cpos,cgeid,cstrand,addtxt
+            println(fid,"$cchr\t.\texon\t$(cpos[1])\t$(cpos[2])\t.\t$cstrand\t.\tgene_id \"$cgeid\";$addtxt")
         end
     end
     nothing
@@ -2433,11 +2449,11 @@ end
 # In the outpus, the positive direction of fold change is B-A in DESeq().
 # For the log2_coef output of DESeqMF(), the alphabetical smallest key factor will not be given.
 #
-#See also: edgeR_anova, GOenrichFB, GOenrichGrp, myR, GSVA, DESeq2
+#See also: edgeR_anova, GOenrichFB, GOenrichGrp, myR, GSVA, DESeq2, DESeq2MF
 #Xiong Jieyi, Mar 10, 2016 > 23 Jul 2017 >24 Jul 2017 >31 May 2018 >16 Aug 2018
 
 export DESeq, DESeqMF
-function DESeq(A::AbstractArray{T1}, B::AbstractArray{T2}; norep::Bool=false, sizeFactors::Tuple=()) where {T1<:Real, T2<:Real}
+function DESeq(A::AbstractArray{T1}, B::AbstractArray{T2}; norep::Bool=false, sizeFactors::Tuple=()) where {T1<:Integer, T2<:Integer}
     @pkgfun(myR,callr,r2j,eR,rlibrary)
     X=hcat(A,B)
     L=[fill(:A,size(A,2));fill(:B,size(B,2))]
@@ -2456,7 +2472,7 @@ function DESeq(A::AbstractArray{T1}, B::AbstractArray{T2}; norep::Bool=false, si
     end
     r2j(callr("nbinomTest",cds,"A","B"), NA=NaN, keepvec=true)
 end
-function DESeqMF(M::AbstractMatrix{T1}, keyF::AbstractVector{T2}, Fs::AbstractVector...; sizeFactors::AbstractVector=[]) where {T1<:Real, T2<:Union{String, Symbol}}
+function DESeqMF(M::AbstractMatrix{T1}, keyF::AbstractVector{T2}, Fs::AbstractVector...; sizeFactors::AbstractVector=[]) where {T1<:Integer, T2<:Union{String, Symbol}}
     @pkgfun(myR,callr,callrj,eR,r2j,rnames,relemj,rlibrary)
     if isempty(Fs)
         fml1=eR("count~keyF")
@@ -2486,23 +2502,27 @@ function DESeqMF(M::AbstractMatrix{T1}, keyF::AbstractVector{T2}, Fs::AbstractVe
     T=rename!(relemj(fit1, kys, NA=NaN, keepvec=true), r"^keyF", "")
     (r2j(callr("p.adjust",pval,method="fdr"), keepvec=true), r2j(pval, keepvec=true), T)
 end
-function DESeqMF(M::AbstractMatrix{T1}, keyF::AbstractVector{Bool}, arg...; kw...) where {T1<:Real}
+function DESeqMF(M::AbstractMatrix{T1}, keyF::AbstractVector{Bool}, arg...; kw...) where {T1<:Integer}
     fdr, rawP, T=DESeqMF(M, ifelse.(keyF, "B", "A"), arg...; kw...)
     (fdr, rawP, T["B"])
 end
 #}}
 
-#{{ DESeq2
-#[[ DESeq2 ]]
-# Table = DESeq(A_counts::Matrix|Vector, B_counts::Matrix|Vector)
-#     --Run DESeq2 to test different gene expression.
+#{{ DESeq2 DESeq2LRT
+#[[ DESeq2 DESeq2LRT ]]
+# Table = DESeq2(A_counts::Matrix|Vector, B_counts::Matrix|Vector)
+# Or ...= DESeq2(counts::Matrix; isB=Bool_vec)
+#     --Run DESeq2 to test different gene expression using Wald test.
+# Table = DESeq2LRT(counts::Matrix, keyFactor[, otherFactor1, otherFactor2, ...]; levels=...)
+#     --Run DESeq2 in likelihood ratio test.
 # Function outputs below fields, all in Vector{Float64}. The positive direction of fold change is B-A.
 #   baseMean, log2FoldChange, lfcSE, stat, pvalue, padj
-# See also: SESeq
-# 23 Feb 2022
+# In DESeq2LRT, keyFactor and otherFactors can be either categroicial (string or symbol) or continuous (numeric). For categroical factor, the order of keyFactor is assigned by `levels=...'. Assigning orders for otherFactors are not supported (and it is not necessary).
+# See also: DESeq, DESeqMF, edgeR_anova
+# 23 Feb 2022 > 13 Dec 2023 > 28 Feb 2024
 
-export DESeq2
-function DESeq2(A::AbstractArray{<:Real}, B::AbstractArray{<:Real})
+export DESeq2, DESeq2LRT
+function DESeq2(A::AbstractArray{<:Integer}, B::AbstractArray{<:Integer})
     #Based on the guides: http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html
     @pkgfun(myR, callrj, rlibrary)
     X=hcat(A, B)
@@ -2514,6 +2534,44 @@ dds <- DESeq(dds)
 res <- results(dds)
 as.list(res)
 }""", X, L)
+end
+function DESeq2(M::AbstractMatrix{<:Integer}; isB::Union{Nothing, AbstractVector{Bool}}=nothing)
+    @assert(!isnothing(isB), "Missed the 2nd dataset or missed isB=....")
+    DESeq2(M[:, .!isB], M[:, isB])
+end
+function DESeq2LRT(M::AbstractMatrix{<:Integer}, keyF::AbstractVector{T}, Fs::AbstractVector...;
+                   levels::Union{Nothing, AbstractVector{T}}=nothing) where T<:Union{String, Symbol, Real}
+    @assert(size(M, 2)==length(keyF), "Factor length should equal to the column number of matrix.")
+    @pkgfun(myR, callrj, rlibrary, callr, eR, j2r_na)
+    factorKeyF=if isnothing(levels)
+        if T<:Real
+            j2r_na
+        else
+            x->callr("factor", x)
+        end
+    else
+        T<:Real && error("For fool-proofing, key factor cannot be numeric when levels is given.")
+        x->callr("factor", x, levels=levels)
+    end
+    factorF=x->isa(x, Real) ? j2r_na : callr("factor", x)
+    if isempty(Fs)
+        fml1=eR("~keyF")
+        fml0=eR("~1")
+        L=callr("data.frame", keyF=factorKeyF(keyF))
+    else
+        Flb=f"F$1".(1:length(Fs))
+        t=join(Flb,"+")
+        fml1=eR("~$t+keyF")
+        fml0=eR("~$t")
+        L=callr("data.frame", tb(ds(Flb, map(factorF, Fs)), keyF=factorKeyF(keyF)))
+    end
+    rlibrary("DESeq2")
+    callrj("""function(M, L, fml1, fml0){
+dds <- DESeqDataSetFromMatrix(countData=M, colData=L, design=fml1)
+dds <- DESeq(dds, test="LRT", reduced=fml0)
+res <- results(dds)
+as.list(res)
+}""", M, L, fml1, fml0)
 end
 #}}
 
@@ -2670,7 +2728,7 @@ function GEOdownload(GSMs::Vector{String}; label::Vector{String}=GSMs, path::Str
         else
             println("Fetching sample info")
             smp, _=rowfunwith(usmp) do T
-                println(T["GSM"])
+                print(T["GSM"])
                 S=sfc"esearch -db sra -query \"$1\"| efetch -format docsum"(T["GSM"])|>readchomp
                 isempty(S) && error("GEO ID is not found: "*T["GSM"])
                 O=ParseStr(S)
@@ -2681,6 +2739,7 @@ function GEOdownload(GSMs::Vector{String}; label::Vector{String}=GSMs, path::Str
                     push!(SRRs, next(O,("\"",))[1])
                 end
                 # (SRX,join(SRRs,','))
+                println("\t"*join(SRRs, ","))
                 tb(reprow(T, length(SRRs)), SRR=SRRs)
             end
             mkdir(path)
@@ -2825,7 +2884,7 @@ function survcoxph(time::AbstractVector{Tt}, status::AbstractVector{Ts}, X::Abst
         anv<-anova(m1, m0)
         if(vb==1 || vb==3){show(m1); show(anv)}
         if(vb==2 || vb==3){show(summary(m1)); show(summary(anv))}
-        list(tail(anv[["P(>|Chi|)"]], n=1), m1\$coefficients, names(m1\$coefficients), m1)
+        list(tail(anv[["Pr(>|Chi|)"]], n=1), m1\$coefficients, names(m1\$coefficients), m1)
         }    
         """
     C=callr(rfun, time, status, X, vb, Fs...)

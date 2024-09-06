@@ -404,19 +404,25 @@ export glm12test
 # N-th-max|min = nthmax|nthmin(N, Vector)
 # N-th-max|min = nthmax|nthmin(N, Matrix, dim)
 # Vector = nthmaxh|nthminh(N, Matrix) # equal to vec(nthmax|nthmin(N,M,2))
-#Calculate the Nth minimum or maximum values. Running time is linearly increased with N.
+#Calculate the Nth minimum or maximum values.
+#When n<=10, running time is linearly increased with N.
+#When n>10, function will automatically decide whether using sort.
 #See also:
-#Xiong Jieyi, March 7, 2015>Jun 6, 2016
+#Xiong Jieyi, March 7, 2015>Jun 6, 2016 > 5 Jan 2024
 
 export nthmin, nthmax, nthminh, nthmaxh
-function nthmin(n::Integer,X::AbstractVector)
-    if n>1
-        X=deepcopy(X)
-        for i=2:n
-            deleteat!(X,argmin(X))
+function nthmin(n::Integer,X::AbstractVector{T}) where T<:Real
+    if n<=1
+        minimum(X)
+    elseif n<=10 && n<length(X)*log(length(X))
+        Y=collect(X)
+        for _=2:n
+            deleteat!(Y, argmin(Y))
         end
-    end
-    minimum(X)
+        minimum(Y)
+    else
+        sort(X)[n]
+    end::T
 end
 #<v0.6# function nthmin{T}(n::Integer,X::AbstractMatrix{T},dim::Int)
 function nthmin(n::Integer,X::AbstractMatrix{T},dim::Int) where {T}
@@ -427,14 +433,18 @@ function nthmin(n::Integer,X::AbstractMatrix{T},dim::Int) where {T}
         hcat(T[nthmin(n,vec(X[i,:])) for i=1:size(X,1)])
     end
 end
-function nthmax(n::Integer,X::AbstractVector)
-    if n>1
-        X=deepcopy(X)
-        for i=2:n
-            deleteat!(X,argmax(X))
+function nthmax(n::Integer,X::AbstractVector{T}) where T<:Real
+    if n<=1
+        maximum(X)
+    elseif n<=10 && n<length(X)*log(length(X))
+        Y=collect(X)
+        for _=2:n
+            deleteat!(Y,argmax(Y))
         end
-    end
-    maximum(X)
+        maximum(Y)
+    else
+        sort(X, rev=true)[n]
+    end::T
 end
 #<v0.6# function nthmax{T}(n::Integer,X::AbstractMatrix{T},dim::Int)
 function nthmax(n::Integer,X::AbstractMatrix{T},dim::Int) where {T}
@@ -472,26 +482,27 @@ function slidwin(fun, Y::Group...; x::Group=1:rownum(Y), winlen::Integer=floor(I
 end
 #}}
 
-#{{ sumh,medianh,meanh,varh,stdh,maximumh,minimumh,anyh,allh
-#[[ sumh medianh meanh varh stdh maximumh maxh minimumh minh anyh allh ]]
+#{{ sumh,medianh,meanh,varh,stdh,maximumh,minimumh,anyh,allh,counth
+#[[ sumh medianh meanh varh stdh maximumh maxh minimumh minh anyh allh counth ]]
 # sumh(X::AbstractMatrix)=vec(sum(X,2)) #The same for other functions.
 # maxh and minh is equal to maximumh and minimumh.
 #Just a syntax suger.
 #see also: truesbut, falsesbut
 #Xiong Jieyi, Jun 24, 2015 >Jan 19, 2016
 
-export sumh,medianh,meanh,varh,stdh,maximumh,maxh,minimumh,minh,anyh,allh
-sumh(X::AbstractMatrix)=vec(sum(X,2))
-medianh(X::AbstractMatrix)=vec(median(X,2))
-meanh(X::AbstractMatrix)=vec(mean(X,2))
-varh(X::AbstractMatrix)=vec(var(X,2))
-stdh(X::AbstractMatrix)=vec(std(X,2))
-maximumh(X::AbstractMatrix)=vec(maximum(X,2))
-maxh(X::AbstractMatrix)=vec(maximum(X,2))
-minimumh(X::AbstractMatrix)=vec(minimum(X,2))
-minh(X::AbstractMatrix)=vec(minimum(X,2))
-anyh(X::AbstractMatrix)=vec(any(X,2))
-allh(X::AbstractMatrix)=vec(all(X,2))
+export sumh,medianh,meanh,varh,stdh,maximumh,maxh,minimumh,minh,anyh,allh,counth
+sumh(X::AbstractMatrix)=vec(sum(X, dims=2))
+medianh(X::AbstractMatrix)=vec(median(X, dims=2))
+meanh(X::AbstractMatrix)=vec(mean(X, dims=2))
+varh(X::AbstractMatrix)=vec(var(X, dims=2))
+stdh(X::AbstractMatrix)=vec(std(X, dims=2))
+maximumh(X::AbstractMatrix)=vec(maximum(X, dims=2))
+maxh(X::AbstractMatrix)=vec(maximum(X, dims=2))
+minimumh(X::AbstractMatrix)=vec(minimum(X, dims=2))
+minh(X::AbstractMatrix)=vec(minimum(X, dims=2))
+anyh(X::AbstractMatrix)=vec(any(X, dims=2))
+allh(X::AbstractMatrix)=vec(all(X, dims=2))
+counth(X::AbstractMatrix)=vec(count(X, dims=2))
 #}}
 
 #{{ mx2DataFrame
@@ -1129,7 +1140,7 @@ end
 #[[ vcatdo ]]
 # (O1, O2, ...) = vcatdo(function, I1, I2, ...)
 # Do as vcatr(O1,O2,...)=function( vcatr(I1,I2,...)), i.e., merge all in-s by row, apply the function, then split the output by row.
-#See also: asvecdo, splitdim, splitdimv
+#See also: mxasvecdo
 #Xiong Jieyi, Sep 20, 2015 > 7 Oct 2020
 
 export vcatdo
@@ -1169,7 +1180,8 @@ export wilcoxtest, studenttest, padjust, cortest, fishertest, fishertest_l, bino
 # p.value = wilcoxtest(x, y = NULL,
 #     alternative = c("two.sided", "less", "greater"),
 #     mu = 0, paired = FALSE, exact = NULL, correct = TRUE,
-#     conf.int = FALSE, conf.level = 0.95, ...; vb=0)
+#     conf.int = FALSE, conf.level = 0.95, ...;
+#     vb=0, keywordcheck=true)
 # Performs one- and two-sample Wilcoxon tests on vectors of data; the latter is also known as 'Mann-Whitney' test.
 # x: numeric vector of data values.  Non-finite (e.g., infinite or missing) values will be omitted.
 # y: an optional numeric vector of data values: as with 'x' non-finite values will be omitted.
@@ -1179,7 +1191,16 @@ export wilcoxtest, studenttest, padjust, cortest, fishertest, fishertest_l, bino
 #See also: studenttest, padjust, cortest, fishertest, binomtest
 #Xiong Jieyi, 27 Oct 2017
 
-function wilcoxtest(arg...; vb::Int=0, warg...)
+function _checkkeyword(arg, kwset)
+    for (k, _) in arg
+        if !in(k, kwset)
+            error("Invalid keyword argument: $k")
+        end
+    end
+end
+
+function wilcoxtest(arg...; vb::Int=0, keywordcheck::Bool=true, warg...)
+    keywordcheck && _checkkeyword(warg, Set([:x, :y, :mu, :paired, :exact, :correct, :conf!int, :conf!level, :formula, :data, :subset, :na!action]))
     @pkgfun(myR, callrw, relem, r2j, rshow)
     o=callrw("wilcox.test", arg...; warg...)
     rshow(o; vb=vb)
@@ -1190,7 +1211,7 @@ end
 # p.value, meanX - meanY, [CI_low, CI_high] = studenttest(x, y = NULL,
 #        alternative = c("two.sided", "less", "greater"),
 #        mu = 0, paired = FALSE, var.equal = FALSE,
-#        conf.level = 0.95, ...; vb=0)
+#        conf.level = 0.95, ...; vb=0, keywordcheck=true)
 # Performs one and two sample t-tests on vectors of data.
 # x: a (non-empty) numeric vector of data values.
 # y: an optional (non-empty) numeric vector of data values.
@@ -1199,7 +1220,8 @@ end
 # See also: studenttest, padjust, cortest, fishertest, binomtest
 # Xiong Jieyi, 27 Oct 2017
 
-function studenttest(arg...; vb::Int=0, warg...)
+function studenttest(arg...; vb::Int=0, keywordcheck::Bool=true, warg...)
+    keywordcheck && _checkkeyword(warg, Set([:x, :y, :alternative, :mu, :paired, :var!equal, :conf!level, :formula, :data, :subset, :na!action]))
     @pkgfun(myR, callrw, relem, r2j, rshow)
     o=callrw("t.test", arg...; warg...)
     rshow(o; vb=vb)
@@ -1224,6 +1246,7 @@ end
 # Xiong Jieyi, 27 Oct 2017
 
 function padjust(arg...; warg...)
+    #p.adjust does not need to check keyword.
     @pkgfun(myR, callr, r2j)
     r2j(callr("p.adjust", arg...; warg...), NA=NaN, keepvec=true)
 end
@@ -1232,7 +1255,8 @@ end
 # r, p.value = cortest(x, y,
 #          alternative = c("two.sided", "less", "greater"),
 #          method = c("pearson", "kendall", "spearman"),
-#          exact = NULL, conf.level = 0.95, continuity = FALSE, ...; vb=0)
+#          exact = NULL, conf.level = 0.95, continuity = FALSE, ...;
+#          vb=0, keywordcheck=true)
 # Test for association between paired samples, using one of Pearson's product moment correlation coefficient, Kendall's tau or Spearman's rho.
 # x, y: numeric vectors of data values.  'x' and 'y' must have the same length.
 # method: a character string indicating which correlation coefficient is to be used for the test.  One of '"pearson"', '"kendall"', or '"spearman"', can be abbreviated.
@@ -1240,7 +1264,8 @@ end
 # See also: wilcoxtest, studenttest, padjust, fishertest, binomtest
 # Xiong Jieyi, 27 Oct 2017
 
-function cortest(arg...; vb::Int=0, warg...)
+function cortest(arg...; vb::Int=0, keywordcheck::Bool=true, warg...)
+    keywordcheck && _checkkeyword(warg, Set([:x, :y, :alternative, :method, :exact, :conf!level, :continuity, :formula, :data, :subset, :na!action]))
     @pkgfun(myR, callrw, relem, r2j, rshow)
     o=callrw("cor.test", arg...; warg...)
     rshow(o; vb=vb)
@@ -1262,6 +1287,7 @@ end
 # Xiong Jieyi, 27 Oct 2017 > 12 Apr 2022
 
 function fishertest(arg...; vb::Int=0, warg...)
+    #fisher.test does not need to check keyword.
     @pkgfun(myR, callr, relem, r2j, rshow)
     o=callr("fisher.test", arg...; warg...)
     rshow(o; vb=vb)
@@ -1288,6 +1314,7 @@ fishertest(::AbstractVector{Bool}, arg...; kw...)=error("Invalid inputs. Do you 
 # Xiong Jieyi, 27 Oct 2017 > 12 Apr 2022
 
 function binomtest(arg...; vb::Int=0, warg...)
+    #binom.test does not need to check keyword.
     @pkgfun(myR, callrw, relem, r2j, rshow)
     ro=callrw("binom.test", arg...; warg...)
     rshow(ro; vb=vb)

@@ -783,7 +783,8 @@ function sortri(X::AbstractMatrix{T};rev::Bool=false) where {T<:Union{Number,Abs
         if Ci<size(X,2)
             p=1
             for i=2:length(idx)
-                if X[idx[p],Ci]!=X[idx[i],Ci]
+                # if X[idx[p],Ci]!=X[idx[i],Ci] 
+                if !isequal(X[idx[p],Ci], X[idx[i],Ci]) #Changed in 6 Mar 2024
                     if p+1<i
                         idx[p:i-1]=sort_core(Ci+1,idx[p:i-1])
                     end
@@ -811,7 +812,9 @@ function sortri(X::Tuple;rev::Bool=false)
         if Ci<length(X)
             p=1
             for i=2:length(idx)
-                if X[Ci][idx[p],:]!=X[Ci][idx[i],:]
+                # Below bug is corrected in 6 Mar 2024
+                # if X[Ci][idx[p],:]!=X[Ci][idx[i],:]
+                if !isequal(X[Ci][idx[p],:], X[Ci][idx[i],:])
                     if p+1<i
                         idx[p:i-1]=sort_core(Ci+1,idx[p:i-1])
                     end
@@ -1545,82 +1548,68 @@ export fastgrp, want, length
 #}}
 
 #{{ freq freqmulti freqas freqmultias idennum
-
 #[[ freq freqmulti freqas freqmultias idennum ]]
-# (Frequence, outGroupId) = freq(GroupId; count=vector, revsort=false,...)
+# (Frequence, outGroupId) = freq(GroupId; count=vector, revsort=false, sorted=false, sortcheck=true)
+# Frequence = freq(outGroupId, GroupId; count=vector, sorted=false, sortcheck=true)
 # (Freq_Matrix, outGroupId) = freqmulti(Grp1,Grp2,...; count=(c1,c2,...), ...)
-# Freq_Matrix = freqmulti(Grp1,Grp2,...; order=outGroupId, count=(c1,c2,...), ...)
+# Freq_Matrix = freqmultias(outGroupId, Grp1,Grp2,...; count=(c1,c2,...), ...)
 # Freq = idennum(GroupId) #Freq is expanded as the same size of GroupId.
-# Frequence|Freq_Matrix = freq|freqmulti(...; ..., order=outGroupId)
-#    Equal to freqas|freqmultias(outGroupId,...; ...)
 #Calculate the frequece of group.
-#freqas should be faster than freq(..., order=...)
-# ...multi... functions always return the frequence in matrix, even only one group input.
-# revsort=true: Output will be reversely sorted by frequence.
+# revsort=true: Output will be reversely sorted according to the frequence.
+# sorted=true: GroupId is pre-sorted. The order will still be checked unless sortcheck=false[Danger].
 #See also: fastgrp, grpfun, isgrpident, twofactormx
-#Xiong Jieyi, 27 Aug 2014>11 Sep 2014>30 Sep 2014>March 27, 2015
+#Xiong Jieyi, 27 Aug 2014>11 Sep 2014>30 Sep 2014>March 27, 2015>31 Aug 2023
 
 export freq, freqmulti, idennum, freqas, freqmultias
-function freqas(order::Group,X::Group;count::Union{Nothing,AbstractVector}=nothing)
+function freq(X::Group;
+              count::Union{Nothing,AbstractVector{<:Integer}}=nothing,
+              revsort::Bool=false,
+              sorted::Bool=false, sortcheck::Bool=true)
     if isnothing(count)
-        (N,id)=__freq_sorted_r(sortr(X)[1])
+        SX=if sorted
+            if sortcheck
+                @assert(issortedr(X), "Input is not sorted while sorted=true.")
+            end
+            X
+        else
+            sortr(X)[1]
+        end
+        (N,id)=__freq_sorted_r(SX)
     else
-        (N,id,ignore)=grpfun(sum,X,count)
+        @assert(!sorted, "In pre-sorted mode (sorted=true), count=... is not supported so far.")
+        (N,id)=grpfun(sum,X,count)
     end
+    if revsort
+        (N,l)=sortr(N,rev=true)
+        (N, getrow(id,l))
+    else
+        (N, id)
+    end
+end
+function freqas(order::Group, arg...; revsort::Bool=false, kw...)
+    # if isnothing(count)
+    #     (N,id)=__freq_sorted_r(sortr(X)[1])
+    # else
+    #     (N,id)=grpfun(sum,X,count)
+    # end
+    N, id = freq(arg...; kw...)
+    @assert(!revsort, "Usage freqas(...; revsort=true) is invalid.")
     dtshift(order,id,N,0)
 end
-function freqmultias(order::Group,Xs::Group...;count::Union{Nothing,AbstractVector}=nothing)
+function freqmultias(order::Group,Xs::Group...;count::Union{Nothing,Tuple}=nothing, kw...)
     if isempty(Xs)
         return zeros(Int,length(order),0)
     end
     if isnothing(count)
-        N=hcat(map(x->freq(x;order=order),Xs)...)
+        N=hcat(map(x->freqas(order, x; kw...), Xs)...)
     else
-        N=hcat(map((x,y)->freq(x;order=order,count=y),Xs,count)...)
+        N=hcat(map((x, y)->freqas(order, x; count=y, kw...), Xs, count)...)
     end
     N
 end
-function freq(X::Group;order::Union{Nothing,Group}=nothing,
-              count::Union{Nothing,AbstractVector}=nothing,
-              revsort::Bool=false)
-    if isnothing(count)
-        (N,id)=__freq_sorted_r(sortr(X)[1])
-    else
-        (N,id,ignore)=grpfun(sum,X,count)
-    end
-    if isnothing(count)
-        if revsort
-            (N,l)=sortr(N,rev=true)
-            (N, getrow(id,l))
-        else
-            (N, id)
-        end
-    else
-        dtshift(order,id,N,0)
-    end
-end
-function freqmulti(Xs::Group...;count::Union{Nothing,Tuple}=nothing,order::Union{Nothing,Group}=nothing)
-    noorder=isnothing(order)
-    if noorder
-        order=unival(vcatr(Xs...))
-    end
-    if isempty(Xs)
-        if noorder
-            return (zeros(Int,length(order),0), order)
-        else
-            return zeros(Int,length(order),0)
-        end
-    end
-    if isnothing(count)
-        N=hcat(map(x->freq(x;order=order),Xs)...)
-    else
-        N=hcat(map((x,y)->freq(x;order=order,count=y),Xs,count)...)
-    end
-    if noorder
-        (N, order)
-    else
-        N
-    end
+function freqmulti(Xs::Group...;count::Union{Nothing,Tuple}=nothing)
+    order=unival(vcatr(Xs...))
+    (freqmultias(order, Xs...; count=count), order)
 end
 idennum(X::Group)=grpfunexp(length,X,1:rownum(X))
 
@@ -1652,7 +1641,8 @@ end
 #                          input_grpno|no=false, input_grpid|id=false, nowarn=false)
 #rlt=grpfun(fun, fastgrp(grp, grp_order),...; default=..., ...) #Group by given order. Note that if function input a fastgrp object rather than a group ID, only one output.
 #(rlt, grpid)=grpfunwith(fun, group|fastgrp, param1, param2,...;
-#                          input_grpno|no=false, input_grpid|id=false, default=..., nowarn=false)
+#                          input_grpno|no=false, input_grpid|id=false,
+#                          onerow=false, default=..., nowarn=false)
 #grpid = grploop(fun, group|fastgrp, param1, param2,...;
 #                          input_grpno|no=false, input_grpid|id=false)
 #Or:
@@ -1660,14 +1650,19 @@ end
 #        #do something with contents
 # end
 # eachgrp object also support getindex. e.g. Oeachgrp[GrpNO]
+#
 #Run function for each group of the inputs.
-#If input_grpno is true, the first argument for fun is the group_NO.
-#If input_grpid is true, the first argument for fun is the group_ID.
-#If both input_grpno and input_grpid is ture, the first and second argument for fun is group_NO and group_ID respectively.
+#When no=true, the first argument for fun is the group_NO.
+#When id=true, the first argument for fun is the group_ID.
+#If both no=true and id=ture, the first and second argument for fun is group_NO and group_ID respectively.
+# default=... : If assigned, and the input is pre-ordered fastgrp object, the empty group will no longer call the given function but directly use this value as result.
+# 
 #The differences between grpfun and grpfunwith: grpfun require the output should be one row, while grpfunwith can have any number line of output. Note that the vector output in grpfun is regarded as a row while in grpfunwith, be regarded as a column. grpfunwith is also supported empty output. 
 #Only for grpfunwith but not for grpfun, if the given function return nothing, this record will be ignored. If all function outputs are nothings, grpfunwith will return (nothing, empty_vec) with a warning, which could be repressed by nowarn=true.
 # onerow=true : grpfunwith collect single row output using addrow!() instead of addrows!(), which the same as rowfun but still tolerate the nothing output.
+#
 #grploop doesn't collect any output.
+#
 #See also: grpfunexp, dtshift, rowfun, dictfun, vcatr, vcatr_with, grpvec
 #Xiong Jieyi, 26 May 2014 >5 Sep 2014>10 Sep 2014>1 Oct 2014>10 Oct 2014>December 12, 2014>Dec 19, 2015>Feb 17, 2016>May 29, 2017>13 Mar 2020>15 Apr 2020
 
@@ -2007,7 +2002,7 @@ end
 
 #{{ rowmx
 
-#[[ rowmx addrow! addrows! ]]
+#[[ rowmx ]]
 #Using a vector to represent a column-number-fixed matrix.
 # obj=rowmx([Type, colnum_num]) #Create a row-matrix objects.
 # obj=addrow!(obj, new_row) #Add a new row to the row-matrix. The vector input is also regarded as a row.
@@ -2184,24 +2179,23 @@ export rowmx,addrow!,addrows!,value,rownum,pileup!,pileup
 #}}
 
 #{{ rowpile
-
-#[[ rowpile add! value elem_num isvirgin pileup pileup! ]]
+#[[ rowpile addrow! addrows! value elem_num isvirgin pileup pileup! ]]
 # rp=rowpile() #Create a rowpile
 # rp=addrow!(rp, V1, V2, ...) #Add value to rowpile. Input could be either scalar or row-matrix. If you hope to add a any value or any array to rowpile, make V as single-element Any or Array vector.
 # rp=addrows!(rp, V1, V2, ...[, rowexp=false]) #Add multiple lines or empty lines. When rowexp is true, all the single row input will be expanded to the same row number of the first input.
 # (V1,V2,...)=value(rp; keep_tuple=false, default=nothing) #Get the value out. When the 2nd argument is false and elem_num(rp)==1, value output the value directly rather than a tuple. When rp is empty, return default value. For compatible reason, syntax value(rp, keep_tuple) is still allowed but not recommended.
 # rownum(rp) #Get the row number. Return 0 for the virginal rowpile.
-# elem_num(rp) #Get the element numbar. Return 0 for the vinginal rowpile.
+# elem_num(rp) #Get the element numbar. Return 0 for the virginal rowpile.
 # T|F=isvirgin(rp) #Test if rowpile is vinginal.
 # pileup!(obj1, obj2, ...) #pile up all matrix to obj1.
 # obj0 = pileup(obj1, obj2, ...) #pile up all matrix to obj0.
 #When X is not a vector, addrow!(rp,(...)[X]) is equal to addrow!(rp,X).
 #Update in Jun 13, 2015: Bool input will be saved as BitArray.
 #Update in 17 Sep 2018: Missing is supported.
-#See also: rowmx
+#See also: rowmx: type rowmx also have method addrow!, addrows!, pileup and pileup!.
 #Xiong Jieyi, 8 Jul 2014>9 Sep 2014>November 23, 2014>Jun 7, 2015>Jun 16, 2015>Dec 6, 2016>29 Sep 2017
 
-export rowpile,add!,value,rownum,elem_num,isvirgin,pileup,pileup!
+export rowpile,value,rownum,elem_num,isvirgin,pileup,pileup!
 mutable struct rowpile
     _container::Vector{Any}
     rowpile()=new(Any[])
@@ -2297,7 +2291,11 @@ function value(R::rowpile; keep_tuple::Bool=false, default=nothing)
         return rlt
     end
 end
-value(R::rowpile, keep_tuple::Bool)=value(R, keep_tuple=keep_tuple) #Only for compatible. 29 Sep 2017
+function value(R::rowpile, keep_tuple::Bool)
+    #Only for compatible. 29 Sep 2017
+    @warn("value(rowpile, T|F) is abolished. Use value(rowpile, keep_tuple=T|F) instead.")
+    value(R, keep_tuple=keep_tuple)
+end
 __value__(X::Dict)=dictfun(__value__,X)
 __value__(X::Tuple)=map(__value__,X)
 __value__(X::rowmx)=value(X)

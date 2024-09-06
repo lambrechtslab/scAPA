@@ -17,11 +17,7 @@ function importpkg(X::AbstractString; preloaded::Bool=false)
     mdnm=Symbol("warpedpkg_$X")
     if !isdefined(Main, mdnm)
         if !preloaded && !isdefined(Main, Symbol(X))
-            try
-                eval(Main,Meta.parse("import $X"))
-            catch
-                eval(Main,Meta.parse("import Pkg; Pkg.add(\"$X\"); import $X"))
-            end            
+            eval(Main,Meta.parse("import $X"))
         end
         mth=join(names(getfield(Main, Symbol(X))),",")
         eval(Main,Meta.parse("""
@@ -35,11 +31,7 @@ end
 function importpkg(X::Symbol; preloaded::Bool=false)
     if !preloaded && !isdefined(Main, X)
         # preloaded && error("Package $X has not been loaded.")
-        try
-            eval(Main,Meta.parse("import $X"))
-        catch
-            eval(Main,Meta.parse("import Pkg; Pkg.add(\"$X\"); import $X"))
-        end            
+        eval(Main,Meta.parse("import $X"))
     end
     getfield(Main, X)::Module
 end
@@ -335,12 +327,19 @@ end
 # [A1, A2, ...], [B1, B2, ...], ... = cols"""[;; control_params...;]A1, B1; A2, B2; ... """
 # A grammar candy to write aligned vectors. Input will be parsed by readdlm(..., ',', String, ';') and then be stripped.
 # The control_params can be:
-#  #col=Type e.g. 2=Int. To assigning data type of given column. Supports all numeric, Char, Bool, Symbol. The unassigned data are strings.
-#  c=, r=; q=' :To assign column delimeter, end-of-line delimeter, and quote charactors. All the changes are work after the control_params. Quotes are only used for including blanks at the begin or end, not for escaping delimeter charactors. Quote charactors inside text will not be stripped. e.g. ' Rock'n'roll '.
-# Jieyi Xiong, 6 Oct 2022
+#  hcat( #col1:#col2, $col3:$col4, ... ) #Merge columns. It must be at the beginning of control_params. The rest control parameters is based on the merged column index rather than the original one.
+#  #col[:#col]=Type e.g. 2=Int, 3:5=Float64. To assigning data type of given column. Supports all numeric, Char, Bool, Symbol. The unassigned data are strings.
+# Below changes are work only in text but not in control_params.
+#  c=','|' '|\t|TAB      To assign column delimeter.
+#  r=;|\n|ENT            To assign end-of-line delimeter.
+#  q='|\0|NO             To assign quote charactor. Quotes are only used for including blanks at the begin or end, not for escaping delimeter charactors. Quote charactors inside text will not be stripped. e.g. ' Rock'n'roll '. Note that to assign comma or blank, need quoted by single quotation mark. NO means no quotes.
+# This macro parse data using readdlm(;quotes=true), followed by strip() for each item. Therefore ,"...", can be used to escape delimeters but cannot protect the flanking blanks unless ,"'...'", is nested (e.g., ," a,b ",=>"a,b", ,"' a;b' ",=>" a;b"). However, when q=", readdlm(;quotes=false) will be performed and delimeters inside "..." will no longer be escaped.
+# Jieyi Xiong, 6 Oct 2022 > 11 Jul 2023 >20 Mar 2024>20 Mar 2024
 
 export @cols_str
 macro cols_str(X::String)
+    catn1=Int[]
+    catn2=Int[]
     kys=Int[]
     funs=Function[]
     dm=','
@@ -350,42 +349,97 @@ macro cols_str(X::String)
         i=findnext(';', X, 3)
         P=X[3:i-1]
         X=X[i+1:end]
-
-        for p in split(P, ',')
-            ky, sval=split(lstrip(p), '=')
-            sval=unescape_string(sval)
-            if ky=="c"
-                dm=only(sval)
-            elseif ky=="r"
-                eof=only(sval)
-            elseif ky=="q"
-                qut=only(sval)
-            elseif r"^\d+$"(ky)
-                cfunt=eval(Meta.parse(sval))::Type
-                cfun=if cfunt<:Number
-                    x->parse(cfunt, x)
-                elseif cfunt<:Char
-                    only
-                else
-                    x->cfunt(x)
+        P=lstrip(P)
+        
+        if startswith(P, "hcat(")
+            pn=findfirst(P, ')')
+            if isnothing(pn)
+                error("Invalid ;;hcat(1:2, 3:4, ...); format.")
+            end
+            for p in split(P[5:pn-1], ',')
+                m=match(r"\s*(\d+)\s*\:\s*(\d+)\s*", p)
+                if isnothing(m)
+                    error("Invalid ;;hcat(1:2, 3:4, ...); format.")
                 end
-                push!(kys, parse(Int, ky))
-                push!(funs, cfun)
-            else
-                error("Unsupported command `$ky'.")
+                push!(catn1, int(m[1]))
+                push!(catn2, int(m[2]))
+            end
+            P=strip(lstrip(P[pn+1:end], ','))
+        end
+        if !isempty(P)
+            for p in split(P, r"\,(?!\')")
+                ky, sval=split(p, '=')
+                ky=strip(ky, ' ')
+                sval=unescape_string(strip(sval, ' '))
+                if length(sval)>2 && sval[1]=='\'' && sval[end]=='\''
+                    sval=sval[2:end-1]
+                end
+
+                kym=match(r"^(\d+)(?:\s*\:(\d+)\s*)?$", ky)
+                if !isnothing(kym)
+                    cfunt=eval(Meta.parse(sval))::Type
+                    cfun=if cfunt<:Number
+                        x->parse(cfunt, x)
+                    elseif cfunt<:Char
+                        only
+                    else
+                        x->cfunt(x)
+                    end
+                    cky1=parse(Int, kym[1])
+                    cky2=isnothing(kym[2]) ? cky1 : parse(Int, kym[2])
+                    for i=cky1:cky2
+                        push!(kys, i)
+                        push!(funs, cfun)
+                    end
+                else
+                    cc::Union{Char, Nothing}=if sval=="ENT"
+                        '\n'
+                    elseif sval=="TAB"
+                        '\t'
+                    elseif sval=="NO"
+                        nothing
+                    elseif length(sval)==1
+                        sval[1]
+                    else
+                        Meta.parse("'$sval'")
+                    end
+                    if ky=="c"
+                        dm=cc::Char
+                    elseif ky=="r"
+                        eof=cc::Char
+                    elseif ky=="q"
+                        qut=cc
+                    else
+                        error("Unsupported command `$ky'.")
+                    end
+                end
             end
         end
     end
     X=replace(unescape_string(X), r"\;\s*$"=>"") #Remove the last semicolon.
-    O=map(eachcol(readdlm(IOBuffer(X), dm, String, eof))) do xs
+    O=map(eachcol(readdlm(IOBuffer(X), dm, String, eof; quotes=qut!='"'))) do xs
         map(xs) do x
             x=String(strip(x))
-            if startswith(x, qut) && endswith(x, qut)
+            if !isnothing(qut) && startswith(x, qut) && endswith(x, qut)
                 x=x[2:end-1]
             end
             x
         end
     end
+    
+    if !isempty(catn1)
+        ldel=falses(length(O))
+        O=convert(Vector{Any}, O)
+        for (i, j) in zip(catn1, catn2)
+            if any(ldel[i:j])
+                error("Overlapped hcat columns are not allowed.")
+            end
+            O[i]=hcat(O[i:j]...)
+            ldel[i+1:j].=true
+        end
+        deleteat!(O, ldel)
+    end
+    
     if !isempty(kys)
         O=convert(Vector{Any}, O)
         for (ky, cfun) in zip(kys, funs)
@@ -400,6 +454,7 @@ end
 #[[ @f_str @F_str @cf_str @cF_str ]]
 # f"\$1=$1 and $(2)-$3 $(4=.3g|x|X) $(5=h)"("aa",100,200,pi,1000) will return string
 #  $1=aa and 100-200 3.14 1k
+# f"...$(1=...[<|>][n-width|$n][m(def)|t|e|w[fill_char=' ']])..." : Fixed width replacement **
 # f"..." actually return a function. For example,
 # map(f"$1-$2", 1:3, 4:6) or f"$1-$2".(1:3, 4:6) outputs:
 # 3-element Array{ASCIIString,1}:
@@ -410,9 +465,18 @@ end
 # f"$(N=...)" allows to specify a printf-like format after = ('%' mark should not be included), or human-readable number ($(N=h), transfer-by saynum()), but format a variable one more time is not supported. (Updated in 5 Aug 2021: f"$(1=.3g)"(NaN) return "NaN" instead of triggering an error like @sprintf(), so does Inf.)
 # In format $(1=.3x|X), number will be transfered to LaTex way of scientific notation. The difference between `x' and `X' is only `X' will warp string inside $...$.
 # In f"$1-$x" but not in F"$1-$x", the $x will also be replaced.
+#
+# ** Fixed width replacement: fillin string (or other data) in fixed width.
+# e.g. f"|$(1=<5)|"("A") => "|A    |"
+#      f"|$(1=>5m&)|"("A") => "|&&&&A|"
+# The width can also be an argument. Note only `$2' but `$(2)' is supported.
+# e.g. f"d$(1=>$2m0)b"(3, 4) => "d0003b"
+#m|t|e|w: In case string is longer than width, m--ignore; t--trim the end; e--throw error; w--trim the end with a warning. "m" is the default value.
+# Consider using fontname="monospace" in this mode to visually align the charactors.
+#
 # cf"..."[c] and cF"..."[c] : combine f"..." and c"..."[c] string macros.
 # See also: @c_str, @cut_str, @k_str
-# Xiong Jieyi, Aug 23, 2015 >Nov 4, 2015 >Aug 4, 2016 >17 May 2018 > 23 Aug 2022
+# Xiong Jieyi, Aug 23, 2015 >Nov 4, 2015 >Aug 4, 2016 >17 May 2018 > 23 Aug 2022>28 May 2024
 
 export @f_str, @F_str, @cf_str, @cF_str
 # function _f_str(T::String, M::String; keep_dollor::Bool=false)
@@ -463,10 +527,8 @@ export @f_str, @F_str, @cf_str, @cF_str
 function _f_str(S::AbstractString; isesc::Bool=false, halfout::Bool=false, isparse::Bool=true)
     p=1
     K=Any[]
-    # rg=isesc ? r"(?<!\\)\$(?:(\d+|[A-Za-z\_]\w*)|\((\d+|[A-Za-z\_]\w*)\)|\((\d+)\=([\d\w\.\-\+\#\*]+)\))" : r"(?<!\\)\$(?:(\d+)|\((\d+)\)|\((\d+)\=([\d\w\.\-\+\#\*]+)\))"
 
     function addto(part::AbstractString, isTheLast::Bool=false)
-        # if ismatch(r"(?<!\\)\$\([\d\.\s]*\)", part) #14 Mar 2023
         if ismatch(r"(?:[^\\]|^)(?:\\\\)*\$\([\d\.\s]*\)", part)
             error("Invalid format inside parentheses of \$(1).")
         elseif ismatch(r"(?:[^\\]|^)(?:\\\\)*\$(?:\([^\)]*)?\b__insidE_valuE_dO_noT_usE__\b", part)
@@ -492,11 +554,11 @@ function _f_str(S::AbstractString; isesc::Bool=false, halfout::Bool=false, ispar
         end
     end
 
-    # while !isnothing((m=match(r"(?<!\\)\$(?:(\d+)|\((\d+)\)|\((\d+)\=([\d\w\.\-\+\#\*]+)\))", S, p);)) #14 Mar 2023
-    while !isnothing((m=match(r"(?:[^\\]|^|\b)(?:\\\\)*(\$)(?:(\d+)|\((\d+)\)|\((\d+)\=([\d\w\.\-\+\#\*]+)\))", S, p);))
-        d0, d1, d2, d3, f=m.captures
+    # while !isnothing((m=match(r"(?:[^\\]|^|\b)(?:\\\\)*(\$)(?:(\d+)|\((\d+)\)|\((\d+)\=([\d\w\.\-\+\#\*]+)\))", S, p);))
+    while !isnothing((mSp=match(r"(?:[^\\]|^|\b)(?:\\\\)*(\$)(?:(\d+)|\((\d+)\)|\((\d+)\=([^\)]+)\))", S[p:end]);)) #If using match(r"...", S, p), there will be a bug: when parse f"$(1)$2", the "$2" under p=5 will not match this Regex. 28 May 2024
+        d0, d1, d2, d3, f0=mSp.captures
         @assert d0=="\$"
-        dollaridx=m.offsets[1]
+        dollaridx=p+mSp.offsets[1]-1
         d=!isnothing(d1) ? d1 : !isnothing(d2) ? d2 : d3
         if r"^\d+$"(d)
             d=parse(Int, d)
@@ -504,7 +566,18 @@ function _f_str(S::AbstractString; isesc::Bool=false, halfout::Bool=false, ispar
 
         addto(S[p:(dollaridx-1)], false)
 
-        cK=if isnothing(f)
+        f, f1, isleftali=if !isnothing(f0)
+            if in('<', f0)
+                (split(f0, '<', limit=2)..., true)
+            elseif in('>', f0)
+                (split(f0, '>', limit=2)..., false)
+            else
+                (f0, nothing, false)
+            end
+        else
+            (f0, nothing, false)
+        end
+        cK=if isnothing(f) || isempty(f)
             if isa(d, Int)
                 :(__insidE_valuE_dO_noT_usE__[$d])
             else
@@ -524,8 +597,57 @@ function _f_str(S::AbstractString; isesc::Bool=false, halfout::Bool=false, ispar
             spf="%$f"
             :(__insidE_valuE_dO_noT_usE__[$d] |> x->isnan(x) || isinf(x) ? x : @sprintf($spf, x))
         end
+        if !isnothing(f1)
+            # m2=match(r"^(\d+)([mtwe](\S)?)?$", f1)
+            m2=match(r"^(?:(\d+)|\$(\d+))([mtwe](\S)?)?$", f1)
+            isnothing(m2) && error("Invalid format: `$f1'")
+            swidth=if !isnothing(m2[1])
+                int(m2[1])
+            else
+                t=int(m2[2])
+                :(__insidE_valuE_dO_noT_usE__[$t]::Integer)
+            end
+            typ=Symbol(something(m2[3], "m")[1])
+            fillchr=only(something(m2[4], " "))
+            chkfun=if typ==:m
+                :(x->x)
+            elseif typ==:t
+                :(x->length(x)>$swidth ? x[1:$swidth] : x)
+            elseif typ==:w
+                quote
+                    x->begin
+                        swidth=$swidth
+                        if length(x)>swidth
+                            @warn("String is longer than $swidth: $x. It was trimmed.")
+                            x[1:swidth]
+                        else
+                            x
+                        end
+                    end
+                end
+            elseif typ==:e
+                quote
+                    x->begin
+                        swidth=$swidth
+                        if length(x)>swidth
+                            error("String is longer than $swidth: $x.")
+                        end
+                        x
+                    end
+                end
+            else
+                error("WTF!")
+            end
+            fillfun=if isleftali
+                :(x->x*(length(x)<$swidth ? repeat($fillchr, $swidth-length(x)) : ""))
+            else
+                :(x->(length(x)<$swidth ? repeat($fillchr, $swidth-length(x)) : "")*x)
+            end
+            cK=:($fillfun($chkfun(string($cK))))
+        end
+        
         push!(K, cK)
-        p=m.offset+length(m.match)
+        p=p+mSp.offset+length(mSp.match)-1
     end
 
     addto(S[p:end], true)
@@ -729,35 +851,62 @@ export cellstr
 
 #{{ num2str
 #[[ num2str ]]
-# AbstractString|StringArray|Tuple = num2str(Real|RealArray|Tuple; mindigit=N|fixdigit=false, maxdec=M, leftfill='0')
-#Convert number matrix to string matrix. The ending 0 in decimal part will be removed.
-#If mindigit is given, the number-string with length less than N will be filled with leftfill on the left.
+# AbstractString|StringArray|Tuple = num2str(Real|RealArray|Tuple; mindigit=N|fixdigit=false, maxdec=M, fillblanks=false, base=10)
+#Convert number matrix to string matrix. The ending 0 in decimal part will be removed (i.e., 1.0=>"1" rather than "1.0").
+#If mindigit is given, the number-string with length less than N will be filled with 0 or blanks on the left, depending on fillblanks=T|F.
 #If maxdec is given, the decimal part will be trimed to M digitals.
 #If fixdigit is ture (First input must be a array), mindigit will be set by the digital of maximum number automatically.
+#base=... is the same as string(::Int; base=...). Only avaiable when input is a integer (array).
 #See also: str2char, cellstr
-#Xiong Jieyi, 27 Aug 2014>January 12, 2015>Feb 8, 2016>8 Nov 2018
+#Xiong Jieyi, 27 Aug 2014>January 12, 2015>Feb 8, 2016>8 Nov 2018>30 Jan 2024
 
 export num2str
-function num2str(X::Real; mindigit::Integer=-1, maxdec::Integer=-1, leftfill::Char='0')
+function num2str(X::Real; mindigit::Integer=1, maxdec::Integer=-1, fillblanks::Bool=false, kw...)
     if maxdec>=0
         X=round(X, digits=maxdec)
     end
     if isinteger(X)
-        S=string(int(X))
+        S=string(int(X); kw...)
     else
-        S=string(X)
+        S=string(X; kw...)
     end
-    if mindigit::Real>0 && length(S)<mindigit
-        S=repeat(leftfill, mindigit-length(S))*S
+    if mindigit>1 && length(S)<mindigit
+        if fillblanks
+            S=repeat(' ', mindigit-length(S))*S
+        else
+            if startswith(S, '-')
+                S=S[1:1]*repeat('0', mindigit-length(S))*S[2:end]
+            else
+                S=repeat('0', mindigit-length(S))*S
+            end
+        end
     end
-    S
+    return S
 end
-function num2str(X::AbstractArray{T}; fixdigit::Bool=false, mindigit::Integer=-1, wargs...) where {T<:Real}
+function num2str(X::AbstractArray{<:Real}; fixdigit::Bool=false, fillblanks::Bool=false, kw...)
     isempty(X) && return Array{String}(undef, size(X))
+    # if fixdigit
+    #     mindigit=floor(Int, log(base, maximum(X))+1)
+    # end
+    C=map(x->num2str(x; kw...), X)
     if fixdigit
-        mindigit=floor(Int, log10(maximum(X))+1)
+        maxlen=maximum(length, C)
+        for i in 1:length(C)
+            S=C[i]
+            if length(S)<maxlen
+                if fillblanks
+                    C[i]=repeat(' ', maxlen-length(S))*S
+                else
+                    if startswith(S, '-')
+                        C[i]=S[1:1]*repeat('0', maxlen-length(S))*S[2:end]
+                    else
+                        C[i]=repeat('0', maxlen-length(S))*S
+                    end
+                end
+            end
+        end
     end
-    map(x->num2str(x; mindigit=mindigit, wargs...),X)
+    return C
 end
 num2str(X::Tuple; wargs...)=tuple(num2str([X...]; wargs...)...)
 #}}
@@ -1483,11 +1632,12 @@ end
 #Run pmap with the repeated env variables.
 # ...=pmapwd(...; debug=true) #Run single process model for debug.
 # ...=pmapwd(...; tryone=true) #Run one process first, and then run remains parallelly.
+# nothing =pmapwd(...; hasout=false, ...) #Give up results collection.
 #Note that env should always be a tuple. For the one input, write env=(V,) rather env=(V).
 #The env=(...) parameter is not necessary since pmap can directly visit environment variables in Julia 1.0.
 #The different beheaves between pmapwd() and pmap(): pmapwd() will cd to the "latest" current path when pmapwd() was called, but pmap() will stick on the "original" current path when the whole script was started.
 #See also: @nohup, retype
-#Xiong Jieyi, 3 Sep 2014>October 24, 2014>November 11, 2014>January 9, 2015>January 11, 2015>March 3, 2015>March 3, 2015>March 19, 2015>19 Feb 2019
+#Xiong Jieyi, 3 Sep 2014>October 24, 2014>November 11, 2014>January 9, 2015>January 11, 2015>March 3, 2015>March 3, 2015>March 19, 2015>19 Feb 2019>13 Mar 2024
 
 #The reason I don't export __pmapwith__(): this function have unstable beheave about the current path, depending on the "real" or "fake" multi-core mode.
 function __pmapwith__(fun::Function, args...; env::Tuple=(), tryone::Bool=false, debug::Bool=false, wargs...)
@@ -1515,9 +1665,18 @@ function __pmapwith__(fun::Function, args...; env::Tuple=(), tryone::Bool=false,
         pmap(fun,args...,repenv...; wargs...)
     end
 end
-function pmapwd(fun::Function, args...; env::Tuple=(), dir::AbstractString=pwd(), wargs...)
-    __pmapwith__((x...)->cd(()->fun(x[1:end-1]...),x[end]),
-             args...; env=tuple(env..., dir), wargs...)
+function pmapwd(fun::Function, args...; env::Tuple=(), dir::AbstractString=pwd(), hasout::Bool=true, wargs...)
+    pfun=if hasout
+        (x...)->cd(()->fun(x[1:end-1]...),x[end])
+    else
+        (x...)->(cd(()->fun(x[1:end-1]...),x[end]); nothing)::Nothing
+    end
+    pout=__pmapwith__(pfun, args...; env=tuple(env..., dir), wargs...)
+    if hasout
+        pout
+    else
+        nothing
+    end
 end
 export pmapwd
 #}}
@@ -1764,8 +1923,8 @@ export promote_array, promote_tuple, promote_group, promote_anyrow, promote_anyr
 
 #}}
 
-#{{ splitdim splitdimv
-#[[ splitdim splitdimv ]]
+#{{ splitdim splitdimv [abolished outside]
+# These functions is abolished. Using eachrow|eachcol() instead.
 # Tuple = splitdim(AbstractMatrix, Dim=1|;dims=1)
 # Vector = splitdimv(...)
 #Cut the matrix into slices or vector and return the tuple or vector of slices. Each element of output container is always a vector. splitdimv has faster speed than splitdim.
@@ -1783,7 +1942,7 @@ function splitdimv(X::AbstractMatrix, D::Integer=1; dims::Integer=D)
     return V
 end
 splitdim(args...;wargs...)=tuple(splitdimv(args...;wargs...)...)
-export splitdim, splitdimv
+# export splitdim, splitdimv
 #}}
 
 #{{ op [ obsoleted ]
@@ -2205,23 +2364,28 @@ export segpileup
 
 #{{ filefun filefunwith fileloop fileiofun
 #[[ filefun filefunwith fileloop fileiofun ]]
-# (Array1,Array2,...)=filefun(function, filename|Cmd|IO; input_rowno|no=false, multi_output=false, skipline=0, ignore::Char='\0', ischomp=true, each=0, maxrow=0, nowarn=false)
-# ((Array1,Array2,...), row_NO)=filefunwith(function, filename|Cmd|IO; input_rowno|no=false, multi_output=false, rowexp=false, skipline=0, ignore::Char='\0', ischomp=true, each=0, maxrow=0, nowarn=false)
+# (Array1,Array2,...)=filefun(function, filename|Cmd|IO; input_rowno|no=false, mrows=false, skipline=0, ignore::Char='\0', ischomp=true, each=0, maxrow=0, nowarn=false)
 # rownum=fileloop(function, filename|Cmd|IO; input_rowno|no=false, skipline=0, ignore::Char='\0', ischomp=true, each=0, maxrow=0)
 # (infile_rownum, outfile_rownum) = fileiofun(function, in_filename|Cmd|IO, out_filename|cmd|IO="/dev/tty"; input_rowno|no=false, skipline=0, ignore::Char='\0', ischomp=true, each=0, maxrow=0, append=false) #'append' assign the open behave of output file.
 # Run function(arg1_rowi,arg2_rowi,...) for each row of file and pile-up the results.
+# If mrows is true, outputs of given function will be collected by addrows!() instead of addrow!(), which means multiple row output is allowed.
 # If the input_rowno is true, the first argument for given function is row number, or row_num / each when each is given.
 # If ischomp is true, the newliner at the end of each line will be chomped.
 # The first #skipline line(s) and the later lines start with ignore charactor will be ignored. The ignored lines will not be counted as row_NO.
 # If maxrow>0, function will stop after get the max rowno.
 # In fileiofun, when the "each" args >0, function will input a N length vector rather than a string. It triggle the function for every N lines. Note that each=0 is different from each=1.
-# The differences between rowfun and rowfunwith: rowfun require the output of fun should be one row, while in rowfunwith fun can output any number of lines. Note that the vector output in rowfun is regarded as a row, while in rowfunwith, be regarded as a column. rowfunwith is also supported empty output. rowexp is only useful while multi_output is true.
-#The enter at the end of each line will be removed.
 #In both filefun and filefunwith function, if the given function return a nothing, this record will be ignored.
 #row loop just run the function but do not record any result.
 #In fileiofun, function can only output three types: AbstractString, AbstractString vector( writed as multi-lines) and nothing(ignore writting). A new-line will be added automatically.
+#
+#Abolishing this function in the future:
+# ((Array1,Array2,...), row_NO)=filefunwith(function, filename|Cmd|IO; input_rowno|no=false, multi_output=false, rowexp=false, skipline=0, ignore::Char='\0', ischomp=true, each=0, maxrow=0, nowarn=false)
+# Consider using filefun(...; mrows=true) instead.
+# (The differences between rowfun and rowfunwith: rowfun require the output of fun should be one row, while in rowfunwith fun can output any number of lines. Note that the vector output in rowfun is regarded as a row, while in rowfunwith, be regarded as a column. rowfunwith is also supported empty output. rowexp is only useful while multi_output is true.)
+#The enter at the end of each line will be removed.
+#
 #See also: getfiles, chomp, dictfun, grpfun, grpfunwith, grpfunexp, rowfun rowfunwith rowloop, readheadmx, read2headmx, flow
-#Xiong Jieyi, 5 Sep 2014>1 Oct 2014>February 23, 2015>May 16, 2015>Feb 23, 2016>Apr 16, 2016
+#Xiong Jieyi, 5 Sep 2014>1 Oct 2014>February 23, 2015>May 16, 2015>Feb 23, 2016>Apr 16, 2016>28 Mar 2024
 
 mutable struct _filefuncore
     buf::Vector{AbstractString}
@@ -2275,7 +2439,7 @@ function _runfilefun(obj::_filefuncore, fun::Function, cline::AbstractString, is
     end
 end
 
-function filefun(fun::Function,fid::IO;multi_output::Bool=false,skipline::Integer=0,ignore::Char='\0', maxrow::Integer=0, nowarn::Bool=false, wargs...)
+function filefun(fun::Function,fid::IO; multi_output::Bool=false, skipline::Integer=0, ignore::Char='\0', maxrow::Integer=0, nowarn::Bool=false, mrows::Bool=false, wargs...)
     for i=1:skipline
         readline(fid)
     end
@@ -2291,11 +2455,17 @@ function filefun(fun::Function,fid::IO;multi_output::Bool=false,skipline::Intege
             continue
         end
         try
-            if !isa(crlt,Void)
+            if !isnothing(crlt) #!isa(crlt,Void)
                 if multi_output
+                    # This case is abolished. Kept here only for compatible reason.
+                    @assert(!mrows)
                     addrow!(rlt,crlt...)
                 else
-                    addrow!(rlt,crlt)
+                    if mrows
+                        addrows!(rlt,crlt)
+                    else
+                        addrow!(rlt,crlt)
+                    end
                 end
             end
         catch err
@@ -2313,12 +2483,13 @@ function filefun(fun::Function,fid::IO;multi_output::Bool=false,skipline::Intege
         nowarn || @warn("No output collected, return nothing instead.")
         return nothing
     else
-        return value(rlt, multi_output)
+        return value(rlt, keep_tuple=multi_output)
     end
 end
 filefun(fun::Function,fn;args...)=open(x->filefun(fun,x;args...),fn)
 
 function filefunwith(fun::Function,fid::IO;multi_output::Bool=false,skipline::Integer=0,ignore::Char='\0', maxrow::Integer=0, nowarn::Bool=false, wargs...)
+    #This function has been abolished since 28 Mar 2024. Kept here only for compatible reason.
     for i=1:skipline
         readline(fid)
     end
@@ -3056,37 +3227,53 @@ totalsizeof(x::Union{AbstractString, Function}, ptr_cache = Set()) = is_seen!(x,
 #}}
 
 #{{ parsestr ParseStr
-#[[ parsestr ParseStr next ]]
+#[[ parsestr parsestr1 ParseStr next next1 ]]
 # Any[value1, value2, ...] = parsestr(txt, commands...; start=1|start_ref=[start])
-# value1|vec_of_value1s = parsestr1(txt|txt_vec, commands...; ...) #Only capture one output. Input can be a vector of string.
+# value1|vec_of_value1s = parsestr1(txt|txt_vec, commands...; default=...) #Only capture one output. Input can be a vector of string. When unmatched, default value will be returned if assigned.
 # obj=ParseStr(txt; start=1)
 # Any[value1, value2, ...] = next(obj, commands...)
-# value1 = next1(obj, commands...)
+# value1 = next1(obj, commands...; default=...)
 #
 # Find txt from the start position. The commands is found by order. Supported commands are: AbstractString, Regex, Int. Int means moving cursor or fetch next/pervious worlds.
 # (:search, "substring"|r"pattern"|r"(token)"|offset) --Search pattern or move cursor. Error if mismatch.
 # (:test|:try|:no, "substring"|r"pattern"|r"(token)") --Similar as :search. :try will ignore the mismatch error. :test will return true|false. :no will error if matched.
 # (:rsearch(=:r)|:rtry, "substring"|offset) --Search from right side. Match should not left to the last match.
 # (:get|, "substring"|r"pattern"|r"(token)"|offset[, function[, defval]]) --Fetch contents. In substring model, return the substring from last match to this match. If mismatch, an error will be thrown unless the "defval" was set. defval is not supported in the "offset" mode.
-# (:getto(=:gt)|:getuntil(=:gu), "substring"|r"pattern"|r"(token)"[, function[, defval]]) --Fetch the substring from last match to the beginning(:getuntil) or end(:getto) this match. i.e., (:getuntil, "substring") is identical to (:get, "substring").
+# (:getto(=:gt)|:getuntil(=:gu), "substring"|r"pattern"|r"(token)"[, function[, defval]]) --Fetch the substring from last match to the beginning(:getuntil) or end(:getto) this match. Note (:getuntil, "substring") is invalid, replace it to (:get, "substring").
 # (:rget(=:rg), "substring"[, function[, defval]]) --Reversely search pattern and fetch substring between this match and last match.
 # (:before|:back, commmand) Run one command only in the region between last match and the match before last match. :back will also move start point back but :before will not. Only one command is supported so far.
 # start_ref can be used to both input and return the next start position before and after processed all commands.
 #Function always return a Any-vector.
 #See also: readall
-#Xiong Jieyi, Sep 22, 2015 >Oct 7, 2015>Nov 17, 2015>Feb 5, 2016>Apr 15, 2016>May 12, 2016>May 20, 2016>Jan 18, 2017>13 Jun 2017>9 Jan 2019>11 May 2022
+#Xiong Jieyi, Sep 22, 2015 >Oct 7, 2015>Nov 17, 2015>Feb 5, 2016>Apr 15, 2016>May 12, 2016>May 20, 2016>Jan 18, 2017>13 Jun 2017>9 Jan 2019>11 May 2022>20 Aug 2024
 
 export parsestr, parsestr1
+macro __ferror__tmp(msg) #In v1.10, macro cannot be defined inside let-block.
+    quote
+        if __repress_error
+            return nothing
+        else
+            error($msg)
+        end
+    end |>esc
+end
 let
     global parsestr
-    function parsestr(txt::AbstractString, cmds...; start_ref::Vector{Int}=[1],start::Int=start_ref[1],prev_ref::Vector{Int}=[1],lastMatchRange_ref::Vector{Trg}=[0:-1]) where {Trg<:Range}
+    # __repress_error=false
+    function parsestr(txt::AbstractString, cmds...; start_ref::Vector{Int}=[1],start::Int=start_ref[1],prev_ref::Vector{Int}=[1],lastMatchRange_ref::Vector{Trg}=[0:-1], no_err::Bool=false) where {Trg<:Range}
+        #19 Aug 2024: no_err is a hiden argument so far. When no_err=true, function return nothing if any error throwed.
         # prev_ref is a one-element vector of the left boundary of :rsearch and :rget.
+        global __repress_error=no_err
         curp=start
         prvp=prev_ref[1]
         mrg::Range=lastMatchRange_ref[1]
         rlts=Any[]
         for cmd in cmds
-            rlt,curp,prvp,mrg=__parsestr_core(txt,curp,prvp,mrg,cmd)
+            t=__parsestr_core(txt,curp,prvp,mrg,cmd)
+            if isnothing(t) #no_err=true && an error was throwed.
+                return nothing
+            end
+            rlt,curp,prvp,mrg=t
             rlt!=nothing && push!(rlts,rlt)
         end
         start_ref[1]=curp
@@ -3129,6 +3316,7 @@ let
             __parsestr_core_search(txt,curp,prvp,mrg,cmd)
         end
     end
+    
     function __parsestr_core_test(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::AbstractString)
         R=search(txt,P,curp)
         if isempty(R)
@@ -3157,7 +3345,7 @@ let
     end
     function __parsestr_core_no(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P)
         rlt,=__parsestr_core_test(txt,curp,prvp,mrg,P)
-        rlt && error("Pattern $P is found at position $curp.")
+        rlt && @__ferror__tmp("Pattern $P is found at position $curp.")
         (nothing,curp,prvp,mrg)
     end
     function __parsestr_core_try(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P)
@@ -3178,13 +3366,13 @@ let
     end
     function __parsestr_core_search(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::AbstractString)
         R=search(txt,P,curp)
-        isempty(R) && error("Cannot find $P at position $curp.")
+        isempty(R) && @__ferror__tmp("Cannot find $P at position $curp.")
         (nothing,last(R)+1,curp,R)
     end
     function __parsestr_core_search(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex)
         R=match(P,txt,curp)
         if R==nothing
-            error("Cannot match $P at position $curp.")
+            @__ferror__tmp("Cannot match $P at position $curp.")
         elseif isempty(R.captures)
             (nothing,R.offset+length(R.match),curp,R.offset:length(R.match)-1)
         else
@@ -3196,7 +3384,7 @@ let
     end
     function __parsestr_core_rsearch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::AbstractString)
         R=rsearch(txt,P,curp-1)
-        (isempty(R) || first(R)<prvp)  && error("Cannot find $P between position $prvp to $curp.")
+        (isempty(R) || first(R)<prvp)  && @__ferror__tmp("Cannot find $P between position $prvp to $curp.")
         (nothing,last(R)+1,curp,R)
     end
     function __parsestr_core_rsearch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Int)
@@ -3207,7 +3395,7 @@ let
         # isempty(R) && error("Cannot find $P at position $curp.")
         if isempty(R)
             if defval==undef
-                error("Cannot find $P at position $curp.")
+                @__ferror__tmp("Cannot find $P at position $curp.")
             else
                 return (defval, curp, prvp, 0:-1)
             end
@@ -3219,89 +3407,96 @@ let
         R=search(txt,P,curp)
         if isempty(R)
             if defval==undef
-                error("Cannot find $P at position $curp.")
+                @__ferror__tmp("Cannot find $P at position $curp.")
             else
                 return (defval, curp, prvp, 0:-1)
             end
         end
         (fun(txt[curp:last(R)]),last(R)+1,curp,R)
     end
-function __parsestr_core_fetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex,fun::Function=x->x,defval=undef)
-    R=match(P,txt,curp)
-    if R==nothing
-        if defval==undef
-            error("Cannot match $P at position $curp.")
+    function __parsestr_core_fetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex,fun::Function=x->x,defval=undef)
+        R=match(P,txt,curp)
+        if R==nothing
+            if defval==undef
+                @__ferror__tmp("Cannot match $P at position $curp.")
+            else
+                return (defval, curp, prvp, 0:-1)
+            end
+        elseif isempty(R.captures)
+            (fun(R.match),R.offset+length(R.match),curp,R.offset:length(R.match)-1)
         else
-            return (defval, curp, prvp, 0:-1)
-        end
-    elseif isempty(R.captures)
-        (fun(R.match),R.offset+length(R.match),curp,R.offset:length(R.match)-1)
-    else
-        (fun(onlyone(R.captures)),R.offsets[1]+length(R.captures[1]),curp,R.offsets[1]:R.offsets[1]+length(R.captures[1])-1)
-    end
-end
-function __parsestr_core_fetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Int,fun::Function=x->x)
-    (fun(txt[curp:curp+P-1]),curp+P,curp,curp+P:curp+P)
-end
-function __parsestr_core_fetchuntil(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex,fun::Function=x->x,defval=undef)
-    R=match(P,txt,curp)
-    if R==nothing
-        if defval==undef
-            error("Cannot match $P at position $curp.")
-        else
-            return (defval, curp, prvp, 0:-1)
-        end
-    elseif isempty(R.captures)
-        (fun(txt[curp:R.offset-1]),R.offset+length(R.match),curp,R.offset:length(R.match)-1)
-    else
-        (fun(txt[curp:onlyone(R.offsets)-1]),R.offsets[1]+length(R.captures[1]),curp,R.offsets[1]:R.offsets[1]+length(R.captures[1])-1)
-    end
-end
-function __parsestr_core_fetchto(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex,fun::Function=x->x,defval=undef)
-    R=match(P,txt,curp)
-    if R==nothing
-        if defval==undef
-            error("Cannot match $P at position $curp.")
-        else
-            return (defval, curp, prvp, 0:-1)
-        end
-    elseif isempty(R.captures)
-        (fun(txt[curp:R.offset+length(R.match)-1]),R.offset+length(R.match),curp,curp,R.offset:length(R.match)-1)
-    else
-        (fun(txt[curp:onlyone(R.offsets)+length(R.captures[1])-1]),R.offsets[1]+length(R.captures[1]),curp,R.offsets[1]:R.offsets[1]+length(R.captures[1])-1)
-    end
-end
-function __parsestr_core_rfetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::AbstractString,fun::Function=x->x,defval=undef)
-    ncurp=first(mrg)-1
-    R=rsearch(txt,P,first(mrg)-1)
-    if isempty(R) || first(R)<prvp
-        if defval==undef
-            error("Cannot rsearch $P at position $ncurp.")
-        else
-            return (defval, curp, prvp, 0:-1)
+            (fun(onlyone(R.captures)),R.offsets[1]+length(R.captures[1]),curp,R.offsets[1]:R.offsets[1]+length(R.captures[1])-1)
         end
     end
-    (fun(txt[last(R)+1:ncurp]),curp,prvp,R)
-end
-function __parsestr_core_rfetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Int,fun::Function=x->x)
-    R=first(mrg)|>x->x-P:x-1
-    (fun(txt[R]),curp,prvp,R)
-end
-function __parsestr_core_back(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,cmd)
-    rlt,curp,prvp=__parsestr_core(txt[1:curp-1],prvp,prvp,mrg,cmd)
-    (rlt,curp,prvp,mrg)
-end
-function __parsestr_core_before(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,cmd)
-    rlt,_,_=__parsestr_core(txt[1:curp-1],prvp,prvp,mrg,cmd)
-    (rlt,curp,prvp,mrg)
-end
-function __parsestr_core_end(txt::AbstractString,curp::Int,prvp::Int,mrg::Range)
-    (nothing,length(txt),curp,length(txt)+1:length(txt)+1)
-end
+    function __parsestr_core_fetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Int,fun::Function=x->x)
+        (fun(txt[curp:curp+P-1]),curp+P,curp,curp+P:curp+P)
+    end
+    function __parsestr_core_fetchuntil(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex,fun::Function=x->x,defval=undef)
+        R=match(P,txt,curp)
+        if R==nothing
+            if defval==undef
+                @__ferror__tmp("Cannot match $P at position $curp.")
+            else
+                return (defval, curp, prvp, 0:-1)
+            end
+        elseif isempty(R.captures)
+            (fun(txt[curp:R.offset-1]),R.offset+length(R.match),curp,R.offset:length(R.match)-1)
+        else
+            (fun(txt[curp:onlyone(R.offsets)-1]),R.offsets[1]+length(R.captures[1]),curp,R.offsets[1]:R.offsets[1]+length(R.captures[1])-1)
+        end
+    end
+    function __parsestr_core_fetchto(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Regex,fun::Function=x->x,defval=undef)
+        R=match(P,txt,curp)
+        if R==nothing
+            if defval==undef
+                @__ferror__tmp("Cannot match $P at position $curp.")
+            else
+                return (defval, curp, prvp, 0:-1)
+            end
+        elseif isempty(R.captures)
+            (fun(txt[curp:R.offset+length(R.match)-1]),R.offset+length(R.match),curp,R.offset:length(R.match)-1)
+        else
+            (fun(txt[curp:onlyone(R.offsets)+length(R.captures[1])-1]),R.offsets[1]+length(R.captures[1]),curp,R.offsets[1]:R.offsets[1]+length(R.captures[1])-1)
+        end
+    end
+    function __parsestr_core_rfetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::AbstractString,fun::Function=x->x,defval=undef)
+        ncurp=first(mrg)-1
+        R=rsearch(txt,P,first(mrg)-1)
+        if isempty(R) || first(R)<prvp
+            if defval==undef
+                @__ferror__tmp("Cannot rsearch $P at position $ncurp.")
+            else
+                return (defval, curp, prvp, 0:-1)
+            end
+        end
+        (fun(txt[last(R)+1:ncurp]),curp,prvp,R)
+    end
+    function __parsestr_core_rfetch(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,P::Int,fun::Function=x->x)
+        R=first(mrg)|>x->x-P:x-1
+        (fun(txt[R]),curp,prvp,R)
+    end
+    function __parsestr_core_back(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,cmd)
+        rlt,curp,prvp=__parsestr_core(txt[1:curp-1],prvp,prvp,mrg,cmd)
+        (rlt,curp,prvp,mrg)
+    end
+    function __parsestr_core_before(txt::AbstractString,curp::Int,prvp::Int,mrg::Range,cmd)
+        rlt,_,_=__parsestr_core(txt[1:curp-1],prvp,prvp,mrg,cmd)
+        (rlt,curp,prvp,mrg)
+    end
+    function __parsestr_core_end(txt::AbstractString,curp::Int,prvp::Int,mrg::Range)
+        (nothing,length(txt),curp,length(txt)+1:length(txt)+1)
+    end
 end
 
-parsestr1(txt::AbstractString, arg...; kw...)=onlyone(parsestr(txt, arg...; kw...))
-parsestr1(txtvec::AbstractVector{<:AbstractString}, arg...; kw...)=map(x->onlyone(parsestr(x, arg...; kw...)), txtvec)
+function parsestr1(txt::AbstractString, arg...; default=undef, kw...)
+    rlt=parsestr(txt, arg...; no_err=!isa(default, UndefInitializer), kw...)
+    if isnothing(rlt)
+        default
+    else
+        only(rlt)
+    end
+end
+parsestr1(txtvec::AbstractVector{<:AbstractString}, arg...; kw...)=map(x->parsestr1(x, arg...; kw...), txtvec)
 
 export ParseStr, next, next1
 
@@ -3314,9 +3509,15 @@ end
 
 ParseStr(txt::AbstractString; start::Integer=1)=ParseStr(txt,[start],[1],[0:-1])
 # import Base.next
-next(obj::ParseStr, args...)=parsestr(obj.str, args...; start_ref=obj.start_ref, prev_ref=obj.prev_ref, lastMatchRange_ref=obj.lastMatchRange_ref)
-next1(obj::ParseStr, args...)=onlyone(next(obj, args...))
-
+next(obj::ParseStr, args...; kw...)=parsestr(obj.str, args...; start_ref=obj.start_ref, prev_ref=obj.prev_ref, lastMatchRange_ref=obj.lastMatchRange_ref, kw...)
+function next1(obj::ParseStr, args...; default=undef, kw...)
+    rlt=next(obj, args...; no_err=!isa(default, UndefInitializer), kw...)
+    if isnothing(rlt)
+        default
+    else
+        only(rlt)
+    end
+end
 #}}
 
 #{{ RefAny
@@ -3389,10 +3590,10 @@ macro timetip(laps::Real, X)
     laps=Float64(laps)
     quote
         # global __lAST_tIME_tIP__
-        if time()-dataProcessKit.__lAST_tIME_tIP__::Float64 > $laps
-            dataProcessKit._reset_last_time_tip()
+        if time()-my.__lAST_tIME_tIP__::Float64 > $laps
+            my._reset_last_time_tip()
             # __lAST_tIME_tIP__=time()
-            print(dataProcessKit.Dates.format(dataProcessKit.Dates.now(), "HH:MM")*"> ")
+            print(my.Dates.format(my.Dates.now(), "HH:MM")*"> ")
             $X
         end
     end |> esc
@@ -3401,10 +3602,10 @@ macro timetip(X)
     # @eval(Main, __lAST_tIME_tIP__=time())
     quote
         # global __lAST_tIME_tIP__
-        if time()-dataProcessKit.__lAST_tIME_tIP__::Float64 > 300.0
-            dataProcessKit._reset_last_time_tip()
+        if time()-my.__lAST_tIME_tIP__::Float64 > 300.0
+            my._reset_last_time_tip()
             # __lAST_tIME_tIP__=time()
-            print(dataProcessKit.Dates.format(dataProcessKit.Dates.now(), "HH:MM")*"> ")
+            print(my.Dates.format(my.Dates.now(), "HH:MM")*"> ")
             $X
         end
     end |> esc
